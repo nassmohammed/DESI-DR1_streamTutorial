@@ -148,8 +148,9 @@ class Data:
             )
 
             # Keep only the SoI_streamfinder rows that do not match any in desi_data
-            only_in_SoI = unmatched[unmatched['_merge'] == 'left_only'].drop(columns=['SOURCE_ID', '_merge'])
+            only_in_SoI = unmatched[unmatched['_merge'] == 'left_only'].drop(columns=['_merge'])
             setattr(self, attr_name, only_in_SoI)
+            print(f'Stars only in SF3: {len(only_in_SoI)}')
 
 class stream:
     def __init__(self, data_object, streamName='Sylgr-I21', streamNo=42):
@@ -183,6 +184,8 @@ class stream:
         self.data.desi_data['phi1'], self.data.desi_data['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame, np.array(self.data.desi_data['TARGET_RA'])*u.deg, np.array(self.data.desi_data['TARGET_DEC'])*u.deg)
 
         self.data.confirmed_sf_and_desi['phi1'], self.data.confirmed_sf_and_desi['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame,np.array(self.data.confirmed_sf_and_desi['TARGET_RA'])*u.deg, np.array(self.data.confirmed_sf_and_desi['TARGET_DEC'])*u.deg)
+
+        self.data.confirmed_sf_not_desi['phi1'], self.data.confirmed_sf_not_desi['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame,np.array(self.data.confirmed_sf_not_desi['RAdeg'])*u.deg, np.array(self.data.confirmed_sf_not_desi['DEdeg'])*u.deg)
 
 
 #class Orbit: WIP
@@ -219,9 +222,10 @@ class StreamPlotter:
             },
             'sf_not_desi': {
                 'marker': 'd',
-                's': 15,
-                'color': 'orange',
-                'alpha': 0.8,
+                's': 20,
+                'color': 'none',
+                'alpha': 1,
+                'edgecolor': 'k',
                 'label': 'SF (not in DESI)',
                 'zorder': 4
             },
@@ -262,12 +266,16 @@ class StreamPlotter:
         """
         if stream_frame:
             col_x = 'phi1'
+            col_x_ = 'phi1'
             label_x = r'$\phi_1$'
             col_y = 'phi2'
+            col_y_= 'phi2'
             label_y = r'$\phi_2$'
         else:
             col_x = 'TARGET_RA'
+            col_x_ = 'RAdeg'
             col_y = 'TARGET_DEC'
+            col_y_ = 'DEdeg'
             label_x = 'RA (deg)'
             label_y = 'DEC (deg)'
 
@@ -275,13 +283,13 @@ class StreamPlotter:
         ax.scatter(
             self.data.confirmed_sf_and_desi[col_x],
             self.data.confirmed_sf_and_desi[col_y],
-            **self.plot_params['sf_in_desi'] # <-- Unpacking the dictionary
+            **self.plot_params['sf_in_desi']
         )
-        # ax.scatter(
-        #     self.data.confirmed_sf_not_desi[col_x],
-        #     self.data.confirmed_sf_not_desi[col_y],
-        #     **self.plot_params['sf_not_desi'] # <-- Unpacking the dictionary
-        # )
+        ax.scatter(
+            self.data.confirmed_sf_not_desi[col_x_],
+            self.data.confirmed_sf_not_desi[col_y_],
+            **self.plot_params['sf_not_desi']
+        )
         if stream_frame:
             if galstream:
                 ax.plot(
