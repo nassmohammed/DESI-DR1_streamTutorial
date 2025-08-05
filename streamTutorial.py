@@ -23,7 +23,7 @@ import os
 import feh_correct
 import warnings
 from astropy.utils.exceptions import AstropyDeprecationWarning
-
+import copy
 # Suppress specific Astropy deprecation warnings
 warnings.filterwarnings("ignore", category=AstropyDeprecationWarning, module='gala.dynamics.core')
 
@@ -73,6 +73,44 @@ class Data:
         else: 
             print('No STREAMFINDER path given.')
 
+    def select(self, mask_or_func):
+        """
+        Applies a mask and returns a new, filtered Data object.
+
+        Args:
+            mask_or_func (function or pd.Series): 
+                - If a function, it must take a DataFrame and return a boolean Series.
+                - If a Series, it must be a boolean mask with an index matching desi_data.
+
+        Returns:
+            Data: A new Data object containing only the filtered data.
+        """
+        new_data_object = copy.copy(self)
+        original_df = new_data_object.desi_data
+
+        if callable(mask_or_func):
+            # It's a function, so call it to get the mask
+            mask = mask_or_func(original_df)
+        else:
+            # Assume it's a pre-computed boolean series
+            mask = mask_or_func
+        
+        new_data_object.desi_data = original_df[mask].copy()
+
+        surviving_source_ids = new_data_object.desi_data['TARGETID'].unique()
+
+        merged = pd.merge(
+            self.SoI_streamfinder.drop_duplicates(subset=['Gaia']),
+            new_data_object.desi_data.drop_duplicates(subset=['TARGETID']),
+            left_on='Gaia',
+            right_on='TARGETID',
+            how='inner'
+)
+        merged.dropna(inplace=True)   
+        print(len(merged))
+        new_data_object.confirmed_sf_and_desi=merged
+        return new_data_object
+
     def sfTable(self):
         ''''
         Not working, ask Joseph how he got his table
@@ -106,6 +144,8 @@ class Data:
         
         # Determine the attribute name to use
         if isin:
+            if hasattr(self, 'confirmed_sf_and_desi'):
+                self.old_base = self.confirmed_sf_and_desi
             base_name = 'confirmed_sf_and_desi'
             attr_name = base_name
             if hasattr(self, base_name):
@@ -114,7 +154,7 @@ class Data:
                 while hasattr(self, f'{base_name}_{suffix}'):
                     suffix = chr(ord(suffix) + 1)
                 attr_name = f'{base_name}_{suffix}'
-
+        
             # Perform the merge and assign to the chosen attribute
             merged = pd.merge(
                 self.SoI_streamfinder.drop_duplicates(subset=[gaia_source_ids]),
@@ -124,9 +164,14 @@ class Data:
                 how='inner'
             )
             merged.dropna(inplace=True)
+            merged['phi1'], merged['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame,np.array(merged['TARGET_RA'])*u.deg, np.array(merged['TARGET_DEC'])*u.deg)
+            setattr(self, base_name, merged) # NOTE change base_name to attr_name if I want to not overwrite past confirmed_sf_and_desi
+            if hasattr(self, 'old_base'):
+                mask = ~self.old_base.isin(merged.to_dict(orient='list')).all(axis=1)
+                not_in_merged = self.old_base[mask]
+                self.cut_confirmed_sf_and_desi = not_in_merged
 
-            setattr(self, attr_name, merged)
-            
+
             print(f"Number of stars in SF: {len(self.SoI_streamfinder)}, Number of DESI and SF stars: {len(merged)}")
             print(f"Saved merged DataFrame as self.data.{attr_name}")
         else:
@@ -143,19 +188,98 @@ class Data:
             self.desi_data.drop_duplicates(subset=['SOURCE_ID']),
             left_on=gaia_source_ids,
             right_on='SOURCE_ID',
-            how='left',
+            how='outer',
             indicator=True
             )
 
             # Keep only the SoI_streamfinder rows that do not match any in desi_data
             only_in_SoI = unmatched[unmatched['_merge'] == 'left_only'].drop(columns=['_merge'])
-            setattr(self, attr_name, only_in_SoI)
+            only_in_SoI['phi1'], only_in_SoI['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame,np.array(only_in_SoI['RAdeg'])*u.deg, np.array(only_in_SoI['DEdeg'])*u.deg)
+            setattr(self, base_name, only_in_SoI)
             print(f'Stars only in SF3: {len(only_in_SoI)}')
 
+class Selection:
+    """
+    A class to manage and apply multiple selection criteria (masks) to a DataFrame.
+    
+    This class allows for the programmatic building of a complex filter by adding
+    individual masks, which are then combined with a logical AND.
+    """
+    def __init__(self, data_frame):
+        """
+        Initializes the Selection object.
+
+        Args:
+            data_frame (pd.DataFrame): The pandas DataFrame to which the selections 
+                                       will be applied.
+        """
+        if not isinstance(data_frame, pd.DataFrame):
+            raise TypeError("Input 'data_frame' must be a pandas DataFrame.")
+        
+        self.df = data_frame
+        self.masks = {} # A dictionary to store named mask functions
+        print(f"Selection object created for DataFrame with {len(self.df)} rows.")
+
+    def add_mask(self, name, mask_func):
+        """
+        Adds a new filtering criterion to the selection.
+
+        Args:
+            name (str): A descriptive name for the mask (e.g., 'metal_poor_cut').
+            mask_func (function): A function that takes a DataFrame and returns a 
+                                  boolean Series (the mask).
+        """
+        self.masks[name] = mask_func
+        print(f"Mask added: '{name}'")
+
+    def remove_mask(self, name):
+        """Removes a mask by its name."""
+        if name in self.masks:
+            del self.masks[name]
+            print(f"Mask removed: '{name}'")
+        else:
+            print(f"Warning: Mask '{name}' not found.")
+            
+    def list_masks(self):
+        """Prints the names of all currently active masks."""
+        if not self.masks:
+            print("No masks are currently active.")
+        else:
+            print("Active masks:")
+            for name in self.masks:
+                print(f"- {name}")
+
+    def get_final_mask(self):
+        """
+        Computes the final combined boolean mask.
+
+        All individual masks are combined using a logical AND.
+
+        Returns:
+            pd.Series: A boolean Series representing the final combined mask.
+        """
+        if not self.masks:
+            print("No masks to apply, returning an all-True mask.")
+            return pd.Series([True] * len(self.df), index=self.df.index)
+
+        # Start with a mask that is True for all entries
+        final_mask = pd.Series(True, index=self.df.index)
+        
+        print("Combining masks...")
+        for name, mask_func in self.masks.items():
+            individual_mask = mask_func(self.df)
+            final_mask &= individual_mask # Combine with logical AND
+            print(f"...'{name}' selected {individual_mask.sum()} stars")
+
+        print(f"Selection: {final_mask.sum()} / {len(self.df)} stars.")
+        return final_mask
+    
+
 class stream:
-    def __init__(self, data_object, streamName='Sylgr-I21', streamNo=42):
+    def __init__(self, data_object, streamName='Sylgr-I21', streamNo=42, frame=None):
         self.streamName = streamName
         self.streamNo = streamNo
+        self.frame=frame
 
         # Store a reference to the data object instead of re-running the init
         self.data = data_object
@@ -163,23 +287,28 @@ class stream:
         # Now, access the dataframes through the passed object
         # e.g., self.data.sf_data instead of self.sf_data
         self.data.SoI_streamfinder = self.data.sf_data[self.data.sf_data['Stream'] == self.streamNo]
-        self.data.SoI_streamfinder.label='SF3'
 
         print('Importing galstreams module...')
         import galstreams
         mwsts = galstreams.MWStreams(verbose=False, implement_Off=True)
         self.data.SoI_galstream = mwsts.get(streamName, None)
-        self.data.SoI_galstream.label = 'galstream'
-
+        if (self.data.SoI_galstream is not None):
+            self.min_dist = np.min(self.data.SoI_galstream.track.distance.value)
+            print(self.min_dist)
+        else:
+            print('No galstream track available for this stream.')
+        if (self.data.SoI_galstream is not None):
+            self.frame = self.data.SoI_galstream.stream_frame
+            self.data.frame = self.data.SoI_galstream.stream_frame
+            self.data.SoI_galstream.gal_phi1 = self.data.SoI_galstream.track.transform_to(self.frame).phi1.deg
+            self.data.SoI_galstream.gal_phi2 = self.data.SoI_galstream.track.transform_to(self.frame).phi2.deg
+            
         print('Creating combined DataFrame of SF and DESI')
         # Access desi_data through self.data
         self.data.sfCrossMatch() #saved as confirmed_sf_and_desi
         self.data.sfCrossMatch(isin=False) #creates DF of stars not in DESI
 
-        self.frame = self.data.SoI_galstream.stream_frame
-        self.data.SoI_galstream.gal_phi1 = self.data.SoI_galstream.track.transform_to(self.frame).phi1.deg
-        self.data.SoI_galstream.gal_phi2 = self.data.SoI_galstream.track.transform_to(self.frame).phi2.deg
-            
+
 
         self.data.desi_data['phi1'], self.data.desi_data['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame, np.array(self.data.desi_data['TARGET_RA'])*u.deg, np.array(self.data.desi_data['TARGET_DEC'])*u.deg)
 
@@ -187,9 +316,18 @@ class stream:
 
         self.data.confirmed_sf_not_desi['phi1'], self.data.confirmed_sf_not_desi['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame,np.array(self.data.confirmed_sf_not_desi['RAdeg'])*u.deg, np.array(self.data.confirmed_sf_not_desi['DEdeg'])*u.deg)
 
+    def threeD_trim(self):
+        """
+        Placeholder for 3D trimming logic.
+        """
+        pass
+        
+            
+            
+
+
 
 #class Orbit: WIP
-
 
 class StreamPlotter:
     """
@@ -210,23 +348,39 @@ class StreamPlotter:
         if not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
 
-
         self.plot_params = {
             'sf_in_desi': {
                 'marker': 'd',
-                's': 30,
+                's': 40,
                 'color': 'green',
                 'label': r'SF $\in$ DESI',
                 'edgecolor': 'k',
-                'zorder': 5 # zorder ensures these points are plotted on top
+                'zorder': 5
             },
             'sf_not_desi': {
                 'marker': 'd',
-                's': 20,
+                's': 30,
                 'color': 'none',
                 'alpha': 1,
                 'edgecolor': 'k',
                 'label': 'SF (not in DESI)',
+                'zorder': 4
+            },
+            'sf_in_desi_notsel': {
+                'marker': 'x',
+                's': 70,
+                'color': 'r',
+                'label': r'SF $\in$ DESI, Cut',
+                'edgecolor': 'k',
+                'zorder': 5
+            },
+            'sf_not_desi_notsel': {
+                'marker': 'd',
+                's': 30,
+                'color': 'none',
+                'alpha': 1,
+                'edgecolor': 'r',
+                'label': 'SF (not in DESI), Cut',
                 'zorder': 4
             },
             'desi_field': {
@@ -238,7 +392,7 @@ class StreamPlotter:
                 'zorder': 1
             },
             'galstream_track': {
-                'color': 'y', # You can still reference old style if you wish
+                'color': 'y',
                 'lw': 2,
                 'alpha': 0.5,
                 'label': 'galstream',
@@ -257,10 +411,17 @@ class StreamPlotter:
                 'lw': 1,
                 'label': 'Best-fit Orbit',
                 'zorder': 3
+            },
+            'background':{
+                'color':'k',
+                's':2,
+                'label':'DESI',
+                'alpha': 0.01,
+                'zorder':0
             }
         }
     
-    def on_sky(self, stream_frame=True, save=False, galstream=True, orbit=True):
+    def on_sky(self, stream_frame=True, showStream=True, save=False, galstream=True, orbit=True, background=False):
         """
         Plots the stream on-sky either in RA, DEC or phi1, phi2
         """
@@ -269,7 +430,7 @@ class StreamPlotter:
             col_x_ = 'phi1'
             label_x = r'$\phi_1$'
             col_y = 'phi2'
-            col_y_= 'phi2'
+            col_y_ = 'phi2'
             label_y = r'$\phi_2$'
         else:
             col_x = 'TARGET_RA'
@@ -280,41 +441,102 @@ class StreamPlotter:
             label_y = 'DEC (deg)'
 
         fig, ax = plt.subplots(figsize=(10, 3))
-        ax.scatter(
-            self.data.confirmed_sf_and_desi[col_x],
-            self.data.confirmed_sf_and_desi[col_y],
-            **self.plot_params['sf_in_desi']
-        )
-        ax.scatter(
-            self.data.confirmed_sf_not_desi[col_x_],
-            self.data.confirmed_sf_not_desi[col_y_],
-            **self.plot_params['sf_not_desi']
-        )
-        if stream_frame:
-            if galstream:
-                ax.plot(
-                    self.data.SoI_galstream.gal_phi1,
-                    self.data.SoI_galstream.gal_phi2,
-                    **self.plot_params['galstream_track'])
-        else:
-            if galstream:
-                ax.plot(
-                    self.data.SoI_galstream.track.ra,
-                    self.data.SoI_galstream.track.dec,
-                    **self.plot_params['galstream_track'])
-        
-        # if hasattr(self.stream, orbit): WIP
-        #         ax.plot(
-        #             self.orbit.,
-        #             self.orbit,
-        #             **self.plot_params['orbit_track'])
+        if showStream:
+            ax.scatter(
+                self.data.confirmed_sf_and_desi[col_x],
+                self.data.confirmed_sf_and_desi[col_y],
+                **self.plot_params['sf_in_desi']
+            )
+            ax.scatter(
+                self.data.confirmed_sf_not_desi[col_x_],
+                self.data.confirmed_sf_not_desi[col_y_],
+                **self.plot_params['sf_not_desi']
+            )
+            if hasattr(self.data, 'cut_confirmed_sf_and_desi'):
+                if showStream:
+                    ax.scatter(
+                        self.data.cut_confirmed_sf_and_desi[col_x],
+                        self.data.cut_confirmed_sf_and_desi['PARALLAX']-2* self.data.cut_confirmed_sf_and_desi['PARALLAX_ERROR'],
+                        **self.plot_params['sf_in_desi_notsel']
+                    )
+            if stream_frame:
+                if galstream:
+                    ax.plot(
+                        self.data.SoI_galstream.gal_phi1,
+                        self.data.SoI_galstream.gal_phi2,
+                        **self.plot_params['galstream_track']
+                    )
+            else:
+                if galstream:
+                    ax.plot(
+                        self.data.SoI_galstream.track.ra,
+                        self.data.SoI_galstream.track.dec,
+                        **self.plot_params['galstream_track']
+                    )
 
-        
-        ax.legend()
+        if background:
+            ax.scatter(
+                self.data.desi_data[col_x],
+                self.data.desi_data[col_y],
+                **self.plot_params['background']
+            )
+
+        # Placeholder for orbit plotting logic
+        # if hasattr(self.stream, orbit):
+        #     ax.plot(
+        #         self.orbit.<x>,
+        #         self.orbit.<y>,
+        #         **self.plot_params['orbit_track'])
+
+        ax.legend(loc='upper left', ncol=4)
         ax.set_ylabel(label_y)
         ax.set_xlabel(label_x)
-        stream_funcs.plot_form(ax)
+        stream_funcs.plot_form(ax)  # Make sure this is defined or imported
 
+    def plx_cut(self, showStream=True, background=True, save=False, galstream=False):
+        fig, ax = plt.subplots(figsize=(10, 5))
+        col_x = 'TARGET_RA'
+        col_x_ = 'RAdeg'
+        label_x = 'RA (deg)'
+        label_y = r'Parallax - 2* Paralalx Error'
+        if background:
+            ax.scatter(
+                self.data.desi_data[col_x],
+                self.data.desi_data['PARALLAX']-2*self.data.desi_data['PARALLAX_ERROR'],
+                **self.plot_params['background']
+            )
+        if showStream:
+            ax.scatter(
+                self.data.confirmed_sf_and_desi[col_x],
+                self.data.confirmed_sf_and_desi['PARALLAX']-2* self.data.confirmed_sf_and_desi['PARALLAX_ERROR'],
+                **self.plot_params['sf_in_desi']
+            )
+            # ax.scatter(
+            #     self.data.confirmed_sf_not_desi[col_x_],
+            #     self.data.confirmed_sf_not_desi['plx']-2*np.nanmean(self.data.desi_data['PARALLAX_ERROR']), # NOTE, error is not given, may want to get from Gaia?
+            #     **self.plot_params['sf_not_desi']
+            # )
+
+        # WIP, want to show if any stars are cut. Right now its failing for some reason.
+        if hasattr(self.data, 'cut_confirmed_sf_and_desi'):
+            if showStream:
+                ax.scatter(
+                    self.data.cut_confirmed_sf_and_desi[col_x],
+                    self.data.cut_confirmed_sf_and_desi['PARALLAX']-2* self.data.cut_confirmed_sf_and_desi['PARALLAX_ERROR'],
+                    **self.plot_params['sf_in_desi_notsel']
+                )
+        #         ax.scatter(
+        #             self.data.notsel.confirmed_sf_not_desi[col_x_],
+        #             self.data.notsel.confirmed_sf_not_desi['PARALLAX']-2* self.data.notsel.confirmed_sf_not_desi['PARALLAX_ERROR'],
+        #             **self.plot_params['sf_not_desi_notsel']
+        #         )
+
+        ax.axhline(y=1/self.stream.min_dist, color='r', linestyle='--', label=f'1 / min_dist ({self.stream.min_dist:.2f})')
+        ax.set_ylim(np.nanmin(self.data.SoI_streamfinder['plx'])-1,np.nanmax(self.data.SoI_streamfinder['plx']+1))
+        ax.legend(loc='upper left', ncol=4)
+        ax.set_ylabel(label_y)
+        ax.set_xlabel(label_x)
+        stream_funcs.plot_form(ax)  # Make sure this is defined or imported
 
 
         

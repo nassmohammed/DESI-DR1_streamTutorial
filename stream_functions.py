@@ -299,7 +299,6 @@ def threeD_max_min_mask(ra_data, dec_data, plx, plx_err, ra_max_min_data, dec_ma
     ra_min = np.min(ra_max_min_data) - ra_wiggle
     dec_max = np.max(dec_max_min_data) + dec_wiggle
     dec_min = np.min(dec_max_min_data) - dec_wiggle
-    
     if (ra_max > 360):
         ra_max = ra_max - 360
         mask = (((ra_data > ra_min) | (ra_data < ra_max)) & ((dec_data > dec_min) &  (dec_data < dec_max)) & ((plx - 2 * plx_err) < (1/min_dist))) # & (dist_data < dist_max)
