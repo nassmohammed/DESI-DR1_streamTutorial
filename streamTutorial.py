@@ -105,10 +105,15 @@ class Data:
             left_on='Gaia',
             right_on='TARGETID',
             how='inner'
-)
+        )
         merged.dropna(inplace=True)   
         print(len(merged))
-        new_data_object.confirmed_sf_and_desi=merged
+        new_data_object.confirmed_sf_and_desi = merged
+        
+        # Store the original confirmed_sf_and_desi for later comparison
+        if hasattr(self, 'confirmed_sf_and_desi'):
+            new_data_object.original_confirmed_sf_and_desi = self.confirmed_sf_and_desi.copy()
+        
         return new_data_object
 
     def sfTable(self):
@@ -144,14 +149,18 @@ class Data:
         
         # Determine the attribute name to use
         if isin:
+            # Store the original data for comparison if it exists
             if hasattr(self, 'confirmed_sf_and_desi'):
                 self.old_base = self.confirmed_sf_and_desi
+            elif hasattr(self, 'original_confirmed_sf_and_desi'):
+                self.old_base = self.original_confirmed_sf_and_desi
+            
             base_name = 'confirmed_sf_and_desi'
             attr_name = base_name
             if hasattr(self, base_name):
                 import string
                 suffix = 'b'
-                while hasattr(self, f'{base_name}_{suffix}'):
+                while hasattr(self ,f'{base_name}_{suffix}'):
                     suffix = chr(ord(suffix) + 1)
                 attr_name = f'{base_name}_{suffix}'
         
@@ -167,9 +176,18 @@ class Data:
             merged['phi1'], merged['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame,np.array(merged['TARGET_RA'])*u.deg, np.array(merged['TARGET_DEC'])*u.deg)
             setattr(self, base_name, merged) # NOTE change base_name to attr_name if I want to not overwrite past confirmed_sf_and_desi
             if hasattr(self, 'old_base'):
-                mask = ~self.old_base.isin(merged.to_dict(orient='list')).all(axis=1)
-                not_in_merged = self.old_base[mask]
-                self.cut_confirmed_sf_and_desi = not_in_merged
+                # Find stars that were in old_base but not in the new merged data
+                # Use SOURCE_ID for comparison as it's the unique identifier
+                old_source_ids = set(self.old_base['SOURCE_ID']) if 'SOURCE_ID' in self.old_base.columns else set()
+                new_source_ids = set(merged['SOURCE_ID']) if 'SOURCE_ID' in merged.columns else set()
+                cut_source_ids = old_source_ids - new_source_ids
+                
+                if cut_source_ids:
+                    not_in_merged = self.old_base[self.old_base['SOURCE_ID'].isin(cut_source_ids)]
+                    self.cut_confirmed_sf_and_desi = not_in_merged
+                else:
+                    # If no stars were cut, create an empty DataFrame with same structure
+                    self.cut_confirmed_sf_and_desi = self.old_base.iloc[0:0].copy()
 
 
             print(f"Number of stars in SF: {len(self.SoI_streamfinder)}, Number of DESI and SF stars: {len(merged)}")
