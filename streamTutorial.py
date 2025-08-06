@@ -19,6 +19,7 @@ from astroquery.gaia import Gaia
 from astropy.table import Table, join
 from collections import OrderedDict
 import time
+from scipy.interpolate import interp1d
 import os
 import feh_correct
 import warnings
@@ -459,6 +460,7 @@ class stream:
         use_mass_frac = dotter_mass_frac_str[np.argmin(dotter_mass_frac - mass_fraction)]
 
         isochrone_path = dotter_directory + 'iso_a' + str(age) + '_z' + str(use_mass_frac) + '.dat'
+        print(f'using {isochrone_path}')
         dotter_mp = np.loadtxt(isochrone_path)
 
         # Obtain the M_g and M_r color band data
@@ -466,14 +468,19 @@ class stream:
         self.dotter_r_mp = dotter_mp[:,7]
 
         if np.round(self.min_dist,4) != 1:
-            distance = self.min_dist*1e3 # [pc] from [kpc]
+            # interpolate distance
+            interpolate_distances = interp1d(self.data.SoI_galstream.gal_phi1, self.data.SoI_galstream.track.distance.value*1000, kind='linear', fill_value='extrapolate')
+            distance_sf = interpolate_distances(self.data.confirmed_sf_and_desi['phi1'])
+            distance_desi = interpolate_distances(self.data.desi_data['phi1'])
+            print('Using distance gradient')
         elif not self.data.confirmed_sf_and_desi.empty:
-            distance = np.nanmean(1/self.data.confirmed_sf_and_desi['PARALLAX'])*1000
-            print(f'set distance to {distance} pc')
+            distance_sf = 1/np.nanmean(self.data.confirmed_sf_and_desi['PARALLAX'])*1000
+            distance_desi = distance_sf
+            print(f'set distance to {distance_sf} pc')
         else:
             print('No distance for the stream, go look in literature and set manually with self.min_dist = XX') #kpc)
-        self.data.desi_colour_idx, self.data.desi_abs_mag, self.data.desi_r_mag = stream_funcs.get_colour_index_and_abs_mag(self.data.desi_data['EBV'], self.data.desi_data['FLUX_G'], self.data.desi_data['FLUX_R'], distance)
-        self.data.sf_colour_idx, self.data.sf_abs_mag, self.data.sf_r_mag = stream_funcs.get_colour_index_and_abs_mag(self.data.confirmed_sf_and_desi['EBV'], self.data.confirmed_sf_and_desi['FLUX_G'], self.data.confirmed_sf_and_desi['FLUX_R'], distance)
+        self.data.desi_colour_idx, self.data.desi_abs_mag, self.data.desi_r_mag = stream_funcs.get_colour_index_and_abs_mag(self.data.desi_data['EBV'], self.data.desi_data['FLUX_G'], self.data.desi_data['FLUX_R'], distance_desi)
+        self.data.sf_colour_idx, self.data.sf_abs_mag, self.data.sf_r_mag = stream_funcs.get_colour_index_and_abs_mag(self.data.confirmed_sf_and_desi['EBV'], self.data.confirmed_sf_and_desi['FLUX_G'], self.data.confirmed_sf_and_desi['FLUX_R'], distance_sf)
 
         g_r_color_dif = self.dotter_g_mp - self.dotter_r_mp
         sorted_indices = np.argsort(self.dotter_r_mp)
@@ -884,18 +891,24 @@ class StreamPlotter:
         """
         Plotting the isochrone and stars
         """
-        fig, ax = plt.subplots(figsize=(5, 5))
+        fig, ax = plt.subplots(figsize=(6, 7))
         if showStream:
-            #if absolute:
-            ax.scatter(self.data.sf_colour_idx, self.data.sf_abs_mag,
-                        **self.plot_params['sf_in_desi'])
-            #else: WIP, apparent isochrone
+            if absolute:
+                ax.scatter(self.data.sf_colour_idx, self.data.sf_abs_mag,
+                            **self.plot_params['sf_in_desi'])
+            else:
+                ax.scatter(self.data.sf_colour_idx, self.data.sf_r_mag,
+                            **self.plot_params['sf_in_desi'])
         if background:
-            ax.scatter(self.data.desi_colour_idx, self.data.desi_abs_mag,
-                        **self.plot_params['background'])
+            if absolute:
+                ax.scatter(self.data.desi_colour_idx, self.data.desi_abs_mag,
+                            **self.plot_params['background'])
+            else:
+                ax.scatter(self.data.desi_colour_idx, self.data.desi_r_mag,
+                            **self.plot_params['background'])
     
         ax.plot(self.stream.isochrone_fit(self.stream.dotter_r_mp), self.stream.dotter_r_mp,
-                c='b')
+                c='b', ls='-.')
         
         # Hard coded
         if BHB:
@@ -912,7 +925,7 @@ class StreamPlotter:
             des_m92_hb_r = m92_hb_r - 0.102 * (m92_hb_g - m92_hb_r) + 0.02
             des_m92_hb_g = des_m92_hb_g - m92ag - dm_m92_harris
             des_m92_hb_r = des_m92_hb_r - m92ar - dm_m92_harris
-            ax.plot(des_m92_hb_g - des_m92_hb_r, des_m92_hb_r, c='b', alpha=0.5)
+            ax.plot(des_m92_hb_g - des_m92_hb_r, des_m92_hb_r, c='b', alpha=1, ls='-.')
             if bhb_wiggle:
                 bhb_color_wiggle = 0.4
                 bhb_abs_mag_wiggle = 0.1
@@ -926,7 +939,7 @@ class StreamPlotter:
         ax.set_xlabel('g-r',fontsize=15)
         ax.set_ylabel('$M_r$',fontsize=15)
         ax.set_xlim(-0.5, 1.2)
-        ax.set_ylim(-1, 9)
+        ax.set_ylim(-1.5, 8)
         ax.invert_yaxis()
         stream_funcs.plot_form(ax)
                 

@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 import pandas as pd
+# Suppress SettingWithCopyWarning
+pd.options.mode.chained_assignment = None
 import healpy as hp
 import scipy as sp
 import scipy.stats as stats
@@ -608,6 +610,11 @@ def get_colour_index_and_abs_mag(ebv, g_flux, r_flux, distances):
         color_index (array): Array of g-r 
         G_mag (array): Array of absolute G magnitudes
     '''
+    # Create copies to avoid SettingWithCopyWarning
+    ebv = np.array(ebv.copy()) if hasattr(ebv, 'copy') else np.array(ebv)
+    g_flux = np.array(g_flux.copy()) if hasattr(g_flux, 'copy') else np.array(g_flux)
+    r_flux = np.array(r_flux.copy()) if hasattr(r_flux, 'copy') else np.array(r_flux)
+    
     flux_mask = (g_flux > 0) & (r_flux > 0)
     ebv[~flux_mask] = np.nan # extinction comes from colour excess between b and v bands -> name of paper?, also Planck
     g_flux[~flux_mask] = np.nan
