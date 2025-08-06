@@ -1,0 +1,2 @@
+# DESI DR1 Stellar Catalogue Stream Tutorial
+- The tutorial notebook (`streamTutorial.ipynb`) will walk users through loading DESI Milky Way Survey data to look for new members of known stellar streams.
