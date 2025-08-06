@@ -103,24 +103,11 @@ class Data:
         
         new_data_object.desi_data = original_df[mask].copy()
 
-        surviving_source_ids = new_data_object.desi_data['TARGETID'].unique()
-
-        merged = pd.merge(
-            self.SoI_streamfinder.drop_duplicates(subset=['Gaia']),
-            new_data_object.desi_data.drop_duplicates(subset=['TARGETID']),
-            left_on='Gaia',
-            right_on='TARGETID',
-            how='inner'
-        )
-        merged.dropna(inplace=True)   
-        print(len(merged))
-        new_data_object.confirmed_sf_and_desi = merged
-        
-        # Store the original confirmed_sf_and_desi for later comparison with cut stars
-        if hasattr(self, 'confirmed_sf_and_desi'):
-            new_data_object.original_confirmed_sf_and_desi = self.confirmed_sf_and_desi.copy()
-            # Also store it as confirmed_sf_and_desi_full to make it more explicit
-            new_data_object.confirmed_sf_and_desi_full = self.confirmed_sf_and_desi.copy()
+        # Copy over stream-related attributes if they exist (for when this is called on stream data)
+        stream_attrs = ['SoI_streamfinder', 'frame', 'SoI_galstream']
+        for attr in stream_attrs:
+            if hasattr(self, attr):
+                setattr(new_data_object, attr, getattr(self, attr))
         
         return new_data_object
 
@@ -181,11 +168,20 @@ class Data:
                 self.desi_data.drop_duplicates(subset=['SOURCE_ID']),
                 left_on=gaia_source_ids,
                 right_on='SOURCE_ID',
-                how='inner'
+                how='inner',
+                suffixes=('_sf', '_desi')
             )
             merged.dropna(inplace=True)
-            merged['phi1'], merged['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame,np.array(merged['TARGET_RA'])*u.deg, np.array(merged['TARGET_DEC'])*u.deg)
-            if 'VRAD' in merged.columns and merged['VRAD'].notnull().any():
+            
+            # Calculate phi1 and phi2 coordinates from TARGET_RA and TARGET_DEC (DESI coordinates)
+            if len(merged) > 0:
+                merged['phi1'], merged['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame,np.array(merged['TARGET_RA'])*u.deg, np.array(merged['TARGET_DEC'])*u.deg)
+            else:
+                # If no matches, create empty phi1 and phi2 columns
+                merged['phi1'] = pd.Series(dtype='float64')
+                merged['phi2'] = pd.Series(dtype='float64')
+            
+            if 'VRAD' in merged.columns and len(merged) > 0 and merged['VRAD'].notnull().any():
                 merged['VGSR'] = np.array(
                     stream_funcs.vhel_to_vgsr(
                         np.array(merged['TARGET_RA']) * u.deg,
@@ -194,9 +190,12 @@ class Data:
                     ).value
                 )
             else:
-                # nans length of the dataframe
-                merged['VGSR'] = np.nan * np.ones(len(merged))
-                print("No valid VRAD values found in 'merged'; skipping VGSR computation.")
+                # nans length of the dataframe or empty series if no data
+                if len(merged) > 0:
+                    merged['VGSR'] = np.nan * np.ones(len(merged))
+                    print("No valid VRAD values found in 'merged'; skipping VGSR computation.")
+                else:
+                    merged['VGSR'] = pd.Series(dtype='float64')
             setattr(self, base_name, merged) # NOTE change base_name to attr_name if I want to not overwrite past confirmed_sf_and_desi
             if hasattr(self, 'old_base') and len(self.old_base) > 0:
                 # Find stars that were in old_base but not in the new merged data
@@ -239,13 +238,21 @@ class Data:
             left_on=gaia_source_ids,
             right_on='SOURCE_ID',
             how='outer',
-            indicator=True
+            indicator=True,
+            suffixes=('_sf', '_desi')
             )
 
             # Keep only the SoI_streamfinder rows that do not match any in desi_data
             only_in_SoI = unmatched[unmatched['_merge'] == 'left_only'].drop(columns=['_merge'])
-            only_in_SoI['phi1'], only_in_SoI['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame,np.array(only_in_SoI['RAdeg'])*u.deg, np.array(only_in_SoI['DEdeg'])*u.deg)
-            only_in_SoI['VGSR'] = np.array(stream_funcs.vhel_to_vgsr(np.array(only_in_SoI['RAdeg'])*u.deg, np.array(only_in_SoI['DEdeg'])*u.deg, np.array(only_in_SoI['VHel'])*u.km/u.s).value)
+            
+            if len(only_in_SoI) > 0:
+                only_in_SoI['phi1'], only_in_SoI['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame,np.array(only_in_SoI['RAdeg'])*u.deg, np.array(only_in_SoI['DEdeg'])*u.deg)
+                only_in_SoI['VGSR'] = np.array(stream_funcs.vhel_to_vgsr(np.array(only_in_SoI['RAdeg'])*u.deg, np.array(only_in_SoI['DEdeg'])*u.deg, np.array(only_in_SoI['VHel'])*u.km/u.s).value)
+            else:
+                # If no SF-only stars, create empty phi1, phi2, and VGSR columns
+                only_in_SoI['phi1'] = pd.Series(dtype='float64')
+                only_in_SoI['phi2'] = pd.Series(dtype='float64')
+                only_in_SoI['VGSR'] = pd.Series(dtype='float64')
             
             setattr(self, base_name, only_in_SoI)
             print(f'Stars only in SF3: {len(only_in_SoI)}')
@@ -326,6 +333,31 @@ class Selection:
         print(f"Selection: {final_mask.sum()} / {len(self.df)} stars.")
         return final_mask
     
+    def get_masks(self, mask_names):
+        """
+        Computes the final mask for a specific list of mask names.
+
+        All individual masks are combined using a logical AND.
+
+        Returns:
+            pd.Series: A boolean Series representing the final combined mask for the specified names.
+        """
+        if not mask_names:
+            print("No mask names provided, returning an all-True mask.")
+            return pd.Series([True] * len(self.df), index=self.df.index)
+
+        combined_mask = pd.Series(True, index=self.df.index)
+        for name in mask_names:
+            if name in self.masks:
+                individual_mask = self.masks[name](self.df)
+                combined_mask &= individual_mask  # Combine with logical AND
+                print(f"...'{name}' selected {individual_mask.sum()} stars")
+            else:
+                print(f"Warning: Mask '{name}' not found. Skipping.")
+        print(f"Selection for specified masks: {combined_mask.sum()} / {len(self.df)} stars.")
+
+        return combined_mask
+
 
 class stream:
     def __init__(self, data_object, streamName='Sylgr-I21', streamNo=42, frame=None):
@@ -373,6 +405,37 @@ class stream:
         # convert sf from VHel to VGSR
         self.data.confirmed_sf_and_desi['VGSR'] = np.array(stream_funcs.vhel_to_vgsr(np.array(self.data.confirmed_sf_and_desi['TARGET_RA'])*u.deg, np.array(self.data.confirmed_sf_and_desi['TARGET_DEC'])*u.deg, np.array(self.data.confirmed_sf_and_desi['VRAD'])*u.km/u.s).value)
         self.data.confirmed_sf_not_desi['VGSR'] = np.array(stream_funcs.vhel_to_vgsr(np.array(self.data.confirmed_sf_not_desi['RAdeg'])*u.deg, np.array(self.data.confirmed_sf_not_desi['DEdeg'])*u.deg, np.array(self.data.confirmed_sf_not_desi['VHel'])*u.km/u.s).value)
+    
+    def mask_stream(self, mask_or_func):
+        """
+        Create a new stream object with filtered data and perform all necessary cross-matching.
+        This replaces the 4-line pattern:
+        - trimmed_desi = SoI.data.select(final_mask)
+        - trimmed_stream = copy.copy(SoI)
+        - trimmed_stream.data = trimmed_desi
+        - trimmed_stream.data.sfCrossMatch(); trimmed_stream.data.sfCrossMatch(False)
+        
+        Args:
+            mask_or_func: The mask or function to apply for filtering
+        
+        Returns:
+            stream: A new stream object with filtered and cross-matched data
+        """
+        # Step 1: Apply the mask to the data
+        trimmed_data = self.data.select(mask_or_func)
+        
+        # Step 2: Create a copy of the stream object
+        trimmed_stream = copy.copy(self)
+        
+        # Step 3: Assign the filtered data
+        trimmed_stream.data = trimmed_data
+        
+        # Step 4: Perform cross-matching
+        trimmed_stream.data.sfCrossMatch()  # Creates confirmed_sf_and_desi
+        trimmed_stream.data.sfCrossMatch(False)  # Creates confirmed_sf_not_desi
+        
+        return trimmed_stream
+    
     def threeD_trim(self):
         """
         Placeholder for 3D trimming logic.
@@ -709,14 +772,15 @@ class StreamPlotter:
         #         self.orbit.<y>,
         #         **self.plot_params['orbit_track'])
 
-        ax[0].set_ylim(np.nanmin(np.concatenate([self.data.confirmed_sf_and_desi[col_y_], self.data.cut_confirmed_sf_and_desi[col_y_]])) - 100,
-                    np.nanmax(np.concatenate([self.data.confirmed_sf_and_desi[col_y_], self.data.cut_confirmed_sf_and_desi[col_y_]])) + 100)
+        if showStream:
+            ax[0].set_ylim(np.nanmin(np.concatenate([self.data.confirmed_sf_and_desi[col_y_], self.data.cut_confirmed_sf_and_desi[col_y_]])) - 100,
+                        np.nanmax(np.concatenate([self.data.confirmed_sf_and_desi[col_y_], self.data.cut_confirmed_sf_and_desi[col_y_]])) + 100)
 
-        ax[1].set_ylim(np.nanmin(np.concatenate([self.data.confirmed_sf_and_desi['PMRA'], self.data.cut_confirmed_sf_and_desi['PMRA']])) - 7,
-                    np.nanmax(np.concatenate([self.data.confirmed_sf_and_desi['PMRA'], self.data.cut_confirmed_sf_and_desi['PMRA']])) + 7)
+            ax[1].set_ylim(np.nanmin(np.concatenate([self.data.confirmed_sf_and_desi['PMRA'], self.data.cut_confirmed_sf_and_desi['PMRA']])) - 7,
+                        np.nanmax(np.concatenate([self.data.confirmed_sf_and_desi['PMRA'], self.data.cut_confirmed_sf_and_desi['PMRA']])) + 7)
 
-        ax[2].set_ylim(np.nanmin(np.concatenate([self.data.confirmed_sf_and_desi['PMDEC'], self.data.cut_confirmed_sf_and_desi['PMDEC']])) - 7,
-                    np.nanmax(np.concatenate([self.data.confirmed_sf_and_desi['PMDEC'], self.data.cut_confirmed_sf_and_desi['PMDEC']])) + 7)
+            ax[2].set_ylim(np.nanmin(np.concatenate([self.data.confirmed_sf_and_desi['PMDEC'], self.data.cut_confirmed_sf_and_desi['PMDEC']])) - 7,
+                        np.nanmax(np.concatenate([self.data.confirmed_sf_and_desi['PMDEC'], self.data.cut_confirmed_sf_and_desi['PMDEC']])) + 7)
         ax[0].legend(loc='upper left', ncol=4)
         ax[0].set_ylabel(label_y)
         ax[1].set_ylabel(r'$\mu_{\alpha}$ [mas/yr]')
