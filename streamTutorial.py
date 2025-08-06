@@ -65,6 +65,9 @@ class Data:
         print("Adding empirical FEH calibration (can find uncalibrated data in column['FEH_uncalib])")
         self.desi_data['FEH_uncalib'] = self.desi_data['FEH']
         self.desi_data['FEH'] = feh_correct.calibrate(self.desi_data['FEH'], self.desi_data['TEFF'], self.desi_data['LOGG'])
+        
+        # Switch to VGSR instead of VRAD
+        self.desi_data['VGSR'] =  np.array(stream_funcs.vhel_to_vgsr(np.array(self.desi_data['TARGET_RA'])*u.deg, np.array(self.desi_data['TARGET_DEC'])*u.deg, np.array(self.desi_data['VRAD'])*u.km/u.s).value)
 
         # Lets load the STREAMFINDER data for Gaia DR3
         if sf_path:
@@ -72,6 +75,8 @@ class Data:
             self.sf_data = sf_data.to_pandas()
         else: 
             print('No STREAMFINDER path given.')
+
+        
 
     def select(self, mask_or_func):
         """
@@ -105,10 +110,17 @@ class Data:
             left_on='Gaia',
             right_on='TARGETID',
             how='inner'
-)
+        )
         merged.dropna(inplace=True)   
         print(len(merged))
-        new_data_object.confirmed_sf_and_desi=merged
+        new_data_object.confirmed_sf_and_desi = merged
+        
+        # Store the original confirmed_sf_and_desi for later comparison with cut stars
+        if hasattr(self, 'confirmed_sf_and_desi'):
+            new_data_object.original_confirmed_sf_and_desi = self.confirmed_sf_and_desi.copy()
+            # Also store it as confirmed_sf_and_desi_full to make it more explicit
+            new_data_object.confirmed_sf_and_desi_full = self.confirmed_sf_and_desi.copy()
+        
         return new_data_object
 
     def sfTable(self):
@@ -144,14 +156,21 @@ class Data:
         
         # Determine the attribute name to use
         if isin:
-            if hasattr(self, 'confirmed_sf_and_desi'):
-                self.old_base = self.confirmed_sf_and_desi
+            # Store the original data for comparison if it exists
+            # Priority: existing confirmed_sf_and_desi > confirmed_sf_and_desi_full > original_confirmed_sf_and_desi
+            if hasattr(self, 'confirmed_sf_and_desi') and len(self.confirmed_sf_and_desi) > 0:
+                self.old_base = self.confirmed_sf_and_desi.copy()
+            elif hasattr(self, 'confirmed_sf_and_desi_full'):
+                self.old_base = self.confirmed_sf_and_desi_full.copy()
+            elif hasattr(self, 'original_confirmed_sf_and_desi'):
+                self.old_base = self.original_confirmed_sf_and_desi.copy()
+            
             base_name = 'confirmed_sf_and_desi'
             attr_name = base_name
             if hasattr(self, base_name):
                 import string
                 suffix = 'b'
-                while hasattr(self, f'{base_name}_{suffix}'):
+                while hasattr(self ,f'{base_name}_{suffix}'):
                     suffix = chr(ord(suffix) + 1)
                 attr_name = f'{base_name}_{suffix}'
         
@@ -166,10 +185,28 @@ class Data:
             merged.dropna(inplace=True)
             merged['phi1'], merged['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame,np.array(merged['TARGET_RA'])*u.deg, np.array(merged['TARGET_DEC'])*u.deg)
             setattr(self, base_name, merged) # NOTE change base_name to attr_name if I want to not overwrite past confirmed_sf_and_desi
-            if hasattr(self, 'old_base'):
-                mask = ~self.old_base.isin(merged.to_dict(orient='list')).all(axis=1)
-                not_in_merged = self.old_base[mask]
-                self.cut_confirmed_sf_and_desi = not_in_merged
+            if hasattr(self, 'old_base') and len(self.old_base) > 0:
+                # Find stars that were in old_base but not in the new merged data
+                # Use SOURCE_ID for comparison as it's the unique identifier
+                old_source_ids = set(self.old_base['SOURCE_ID']) if 'SOURCE_ID' in self.old_base.columns else set()
+                new_source_ids = set(merged['SOURCE_ID']) if 'SOURCE_ID' in merged.columns else set()
+                cut_source_ids = old_source_ids - new_source_ids
+                
+                if cut_source_ids:
+                    not_in_merged = self.old_base[self.old_base['SOURCE_ID'].isin(cut_source_ids)]
+                    self.cut_confirmed_sf_and_desi = not_in_merged
+                    print(f"Created cut_confirmed_sf_and_desi with {len(not_in_merged)} stars that were filtered out")
+                else:
+                    # If no stars were cut, create an empty DataFrame with same structure
+                    self.cut_confirmed_sf_and_desi = self.old_base.iloc[0:0].copy()
+                    print("No stars were cut - cut_confirmed_sf_and_desi is empty")
+            else:
+                # No old_base available - create empty DataFrame
+                if hasattr(self, 'confirmed_sf_and_desi') and len(self.confirmed_sf_and_desi) > 0:
+                    self.cut_confirmed_sf_and_desi = self.confirmed_sf_and_desi.iloc[0:0].copy()
+                else:
+                    self.cut_confirmed_sf_and_desi = pd.DataFrame()
+                print("No original data available for comparison - cut_confirmed_sf_and_desi is empty")
 
 
             print(f"Number of stars in SF: {len(self.SoI_streamfinder)}, Number of DESI and SF stars: {len(merged)}")
@@ -416,7 +453,7 @@ class StreamPlotter:
                 'color':'k',
                 's':2,
                 'label':'DESI',
-                'alpha': 0.01,
+                'alpha': 0.02,
                 'zorder':0
             }
         }
@@ -538,7 +575,117 @@ class StreamPlotter:
         ax.set_xlabel(label_x)
         stream_funcs.plot_form(ax)  # Make sure this is defined or imported
 
+    def kin_plot(self, showStream=True, background=True, save=False, stream_frame=True):#, galstream=False):
+        """
+        Plots the stream kinematics either on-sky or stream_frame
+        """
+        if stream_frame:
+            col_x = 'phi1'
+            col_x_ = 'phi1'
+            label_x = r'$\phi_1$'
+            col_y = 'VGSR'
+            col_y_ = 'VGSR'
+            label_y = r'V_${GSR}$ (km/s)'
+        else:
+            col_x = 'TARGET_RA'
+            col_x_ = 'RAdeg'
+            col_y = 'VGSR'
+            col_y_ = 'VGSR'
+            label_x = 'RA (deg)'
+            label_y = 'VGSR (km/s)'
 
-        
+        fig, ax = plt.subplots(3, 1, figsize=(10, 10))
+        if showStream:
+            ax[0].scatter(
+                self.data.confirmed_sf_and_desi[col_x],
+                self.data.confirmed_sf_and_desi[col_y],
+                **self.plot_params['sf_in_desi']
+            )
+            ax[1].scatter(
+                self.data.confirmed_sf_and_desi[col_x],
+                self.data.confirmed_sf_and_desi['PMRA'],
+                **self.plot_params['sf_in_desi']
+            )
+            ax[2].scatter(
+                self.data.confirmed_sf_and_desi[col_x],
+                self.data.confirmed_sf_and_desi['PMDEC'],
+                **self.plot_params['sf_in_desi']
+            )
+            # WIP, option to show sf not in desi
+            if hasattr(self.data, 'cut_confirmed_sf_and_desi'):
+                if showStream:
+                    ax[0].scatter(
+                        self.data.cut_confirmed_sf_and_desi[col_x],
+                        self.data.cut_confirmed_sf_and_desi[col_y_],
+                        **self.plot_params['sf_in_desi_notsel']
+                    )
+                    ax[1].scatter(
+                        self.data.cut_confirmed_sf_and_desi[col_x],
+                        self.data.cut_confirmed_sf_and_desi['PMRA'],
+                        **self.plot_params['sf_in_desi_notsel']
+                    )
+                    ax[2].scatter(
+                        self.data.cut_confirmed_sf_and_desi[col_x],
+                        self.data.cut_confirmed_sf_and_desi['PMDEC'],
+                        **self.plot_params['sf_in_desi_notsel']
+                    )
+            # if stream_frame: WIP show galstream
+            #     if galstream:
+            #         ax[0].plot(
+            #             self.data.SoI_galstream.gal_phi1,
+            #             self.data.SoI_galstream.,
+            #             **self.plot_params['galstream_track']
+            #         )
+            #         ax[0].plot(
+            #             self.data.SoI_galstream.gal_phi1,
+            #             self.data.SoI_galstream.gal_phi2,
+            #             **self.plot_params['galstream_track']
+            #         )
+            # else:
+            #     if galstream:
+            #         ax[0].plot(
+            #             self.data.SoI_galstream.track.ra,
+            #             self.data.SoI_galstream.track.dec,
+            #             **self.plot_params['galstream_track']
+            #         )
 
+        if background:
+            ax[0].scatter(
+                self.data.desi_data[col_x],
+                self.data.desi_data[col_y],
+                **self.plot_params['background']
+            )
+            ax[1].scatter(
+                self.data.desi_data[col_x],
+                self.data.desi_data['PMRA'],
+                **self.plot_params['background']
+            )
+            ax[2].scatter(
+                self.data.desi_data[col_x],
+                self.data.desi_data['PMDEC'],
+                **self.plot_params['background']
+            )
 
+        # Placeholder for orbit plotting logic
+        # if hasattr(self.stream, orbit):
+        #     ax.plot(
+        #         self.orbit.<x>,
+        #         self.orbit.<y>,
+        #         **self.plot_params['orbit_track'])
+
+        ax[0].set_ylim(np.nanmin(np.concatenate([self.data.confirmed_sf_and_desi[col_y_], self.data.cut_confirmed_sf_and_desi[col_y_]])) - 100,
+                    np.nanmax(np.concatenate([self.data.confirmed_sf_and_desi[col_y_], self.data.cut_confirmed_sf_and_desi[col_y_]])) + 100)
+
+        ax[1].set_ylim(np.nanmin(np.concatenate([self.data.confirmed_sf_and_desi['PMRA'], self.data.cut_confirmed_sf_and_desi['PMRA']])) - 20,
+                    np.nanmax(np.concatenate([self.data.confirmed_sf_and_desi['PMRA'], self.data.cut_confirmed_sf_and_desi['PMRA']])) + 20)
+
+        ax[2].set_ylim(np.nanmin(np.concatenate([self.data.confirmed_sf_and_desi['PMDEC'], self.data.cut_confirmed_sf_and_desi['PMDEC']])) - 20,
+                    np.nanmax(np.concatenate([self.data.confirmed_sf_and_desi['PMDEC'], self.data.cut_confirmed_sf_and_desi['PMDEC']])) + 20)
+        ax[0].legend(loc='upper left', ncol=4)
+        ax[0].set_ylabel(label_y)
+        ax[1].set_ylabel(r'$\mu_{\alpha}$ [mas/yr]')
+        ax[2].set_ylabel(r'$\mu_{\delta}$ [mas/yr]')
+        ax[-1].set_xlabel(label_x)
+        stream_funcs.plot_form(ax[0])  
+        stream_funcs.plot_form(ax[1]) 
+        stream_funcs.plot_form(ax[2])
