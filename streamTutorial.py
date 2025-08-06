@@ -37,7 +37,7 @@ class Data:
         desired_columns = [
         'VRAD', 'VRAD_ERR', 'RVS_WARN', 'TEFF', 'LOGG', ## TEFF and LOGG needed for FeH correction
         'RR_SPECTYPE', 
-        'TARGET_RA', 'TARGET_DEC', 'FEH', 'FEH_ERR', 
+        'TARGET_RA', 'TARGET_DEC', 'FEH', 'FEH_ERR', 'EBV', 'FLUX_G', 'FLUX_R', 'FLUX_Z',
         'TARGETID', 'PRIMARY', 'PHOT_BP_MEAN_FLUX', 'PHOT_RP_MEAN_FLUX',
         'SOURCE_ID', 'PMRA', 'PMRA_ERROR', 'PMDEC', 'PMDEC_ERROR', 'PARALLAX', 'PARALLAX_ERROR', 'PMRA_PMDEC_CORR'
         ]
@@ -435,17 +435,53 @@ class stream:
         trimmed_stream.data.sfCrossMatch(False)  # Creates confirmed_sf_not_desi
         
         return trimmed_stream
-    
-    def threeD_trim(self):
-        """
-        Placeholder for 3D trimming logic.
-        """
-        pass
-        
-            
-            
 
+    def isochrone(self, metallicity, age, dotter_directory='./data/dotter/'):
+        """
+        Placeholder for isochrone fitting logic.
+        """
+        mass_fraction = 0.0181 * 10 ** metallicity
 
+        dotter_mass_frac = np.array([
+        0.00006, 0.00007, 0.00009, 0.00010, 0.00011, 0.00013, 0.00014, 0.00016,
+        0.00017, 0.00019, 0.00021, 0.00024, 0.00028, 0.00032, 0.00037, 0.00042,
+        0.00049, 0.00057, 0.00063, 0.00072, 0.00082, 0.00093, 0.00108, 0.00124,
+        0.00144, 0.00166, 0.00189, 0.00213, 0.00242, 0.00276, 0.00316, 0.00363,
+        0.00417
+        ])
+        dotter_mass_frac_str = [
+        "0.00006", "0.00007", "0.00009", "0.00010", "0.00011", "0.00013", "0.00014", "0.00016",
+        "0.00017", "0.00019", "0.00021", "0.00024", "0.00028", "0.00032", "0.00037", "0.00042",
+        "0.00049", "0.00057", "0.00063", "0.00072", "0.00082", "0.00093", "0.00108", "0.00124",
+        "0.00144", "0.00166", "0.00189", "0.00213", "0.00242", "0.00276", "0.00316", "0.00363",
+        "0.00417"
+    ]
+        use_mass_frac = dotter_mass_frac_str[np.argmin(dotter_mass_frac - mass_fraction)]
+
+        isochrone_path = dotter_directory + 'iso_a' + str(age) + '_z' + str(use_mass_frac) + '.dat'
+        dotter_mp = np.loadtxt(isochrone_path)
+
+        # Obtain the M_g and M_r color band data
+        self.dotter_g_mp = dotter_mp[:,6]
+        self.dotter_r_mp = dotter_mp[:,7]
+
+        if np.round(self.min_dist,4) != 1:
+            distance = self.min_dist*1e3 # [pc] from [kpc]
+        elif not self.data.confirmed_sf_and_desi.empty:
+            distance = np.nanmean(1/self.data.confirmed_sf_and_desi['PARALLAX'])*1000
+            print(f'set distance to {distance} pc')
+        else:
+            print('No distance for the stream, go look in literature and set manually with self.min_dist = XX') #kpc)
+        self.data.desi_colour_idx, self.data.desi_abs_mag, self.data.desi_r_mag = stream_funcs.get_colour_index_and_abs_mag(self.data.desi_data['EBV'], self.data.desi_data['FLUX_G'], self.data.desi_data['FLUX_R'], distance)
+        self.data.sf_colour_idx, self.data.sf_abs_mag, self.data.sf_r_mag = stream_funcs.get_colour_index_and_abs_mag(self.data.confirmed_sf_and_desi['EBV'], self.data.confirmed_sf_and_desi['FLUX_G'], self.data.confirmed_sf_and_desi['FLUX_R'], distance)
+
+        g_r_color_dif = self.dotter_g_mp - self.dotter_r_mp
+        sorted_indices = np.argsort(self.dotter_r_mp)
+        sorted_dotter_r_mp = self.dotter_r_mp[sorted_indices]
+        g_r_color_dif = g_r_color_dif[sorted_indices]
+
+        # Fit for the isochrone line
+        self.isochrone_fit = sp.interpolate.UnivariateSpline(sorted_dotter_r_mp, g_r_color_dif, s=0)
 
 #class Orbit: WIP
 
@@ -843,3 +879,54 @@ class StreamPlotter:
         stream_funcs.plot_form(ax) 
 
         return fig, ax
+
+    def iso_plot(self, showStream=True, show_sf_only=False, background=True, save=False, absolute=True, BHB=True, bhb_wiggle=False):
+        """
+        Plotting the isochrone and stars
+        """
+        fig, ax = plt.subplots(figsize=(5, 5))
+        if showStream:
+            #if absolute:
+            ax.scatter(self.data.sf_colour_idx, self.data.sf_abs_mag,
+                        **self.plot_params['sf_in_desi'])
+            #else: WIP, apparent isochrone
+        if background:
+            ax.scatter(self.data.desi_colour_idx, self.data.desi_abs_mag,
+                        **self.plot_params['background'])
+    
+        ax.plot(self.stream.isochrone_fit(self.stream.dotter_r_mp), self.stream.dotter_r_mp,
+                c='b')
+        
+        # Hard coded
+        if BHB:
+
+            # build the BHB using empirical data from M92
+            dm_m92_harris = 14.59 #dm of M92
+            m92ebv = 0.023
+            m92ag = m92ebv * 3.184
+            m92ar = m92ebv * 2.130
+            m92_hb_r = np.array([17.3, 15.8, 15.38, 15.1, 15.05])
+            m92_hb_col = np.array([-0.39, -0.3, -0.2, -0.0, 0.1])
+            m92_hb_g = m92_hb_r + m92_hb_col
+            des_m92_hb_g = m92_hb_g - 0.104 * (m92_hb_g - m92_hb_r) + 0.01
+            des_m92_hb_r = m92_hb_r - 0.102 * (m92_hb_g - m92_hb_r) + 0.02
+            des_m92_hb_g = des_m92_hb_g - m92ag - dm_m92_harris
+            des_m92_hb_r = des_m92_hb_r - m92ar - dm_m92_harris
+            ax.plot(des_m92_hb_g - des_m92_hb_r, des_m92_hb_r, c='b', alpha=0.5)
+            if bhb_wiggle:
+                bhb_color_wiggle = 0.4
+                bhb_abs_mag_wiggle = 0.1
+                ax.plot(des_m92_hb_g - des_m92_hb_r, des_m92_hb_r-bhb_color_wiggle, 'r--', alpha=0.5)
+                ax.plot(des_m92_hb_g - des_m92_hb_r, des_m92_hb_r+bhb_color_wiggle, 'r--', alpha=0.5)
+                ax.plot(des_m92_hb_g - des_m92_hb_r+bhb_abs_mag_wiggle, des_m92_hb_r, 'r-.', alpha=0.5)
+                ax.plot(des_m92_hb_g - des_m92_hb_r-bhb_abs_mag_wiggle, des_m92_hb_r, 'r-.', alpha=0.5)
+        # Hard coded
+        
+        ax.legend(loc='lower left')
+        ax.set_xlabel('g-r',fontsize=15)
+        ax.set_ylabel('$M_r$',fontsize=15)
+        ax.set_xlim(-0.5, 1.2)
+        ax.set_ylim(-1, 9)
+        ax.invert_yaxis()
+        stream_funcs.plot_form(ax)
+                
