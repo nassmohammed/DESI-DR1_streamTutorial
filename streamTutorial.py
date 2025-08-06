@@ -73,6 +73,7 @@ class Data:
         if sf_path:
             sf_data = table.Table.read(self.sf_path)
             self.sf_data = sf_data.to_pandas()
+            self.sf_data['VGSR'] = np.array(stream_funcs.vhel_to_vgsr(np.array(self.sf_data['RAdeg'])*u.deg, np.array(self.sf_data['DEdeg'])*u.deg, np.array(self.sf_data['VHel'])*u.km/u.s).value)
         else: 
             print('No STREAMFINDER path given.')
 
@@ -184,6 +185,18 @@ class Data:
             )
             merged.dropna(inplace=True)
             merged['phi1'], merged['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame,np.array(merged['TARGET_RA'])*u.deg, np.array(merged['TARGET_DEC'])*u.deg)
+            if 'VRAD' in merged.columns and merged['VRAD'].notnull().any():
+                merged['VGSR'] = np.array(
+                    stream_funcs.vhel_to_vgsr(
+                        np.array(merged['TARGET_RA']) * u.deg,
+                        np.array(merged['TARGET_DEC']) * u.deg,
+                        np.array(merged['VRAD']) * u.km/u.s
+                    ).value
+                )
+            else:
+                # nans length of the dataframe
+                merged['VGSR'] = np.nan * np.ones(len(merged))
+                print("No valid VRAD values found in 'merged'; skipping VGSR computation.")
             setattr(self, base_name, merged) # NOTE change base_name to attr_name if I want to not overwrite past confirmed_sf_and_desi
             if hasattr(self, 'old_base') and len(self.old_base) > 0:
                 # Find stars that were in old_base but not in the new merged data
@@ -232,6 +245,8 @@ class Data:
             # Keep only the SoI_streamfinder rows that do not match any in desi_data
             only_in_SoI = unmatched[unmatched['_merge'] == 'left_only'].drop(columns=['_merge'])
             only_in_SoI['phi1'], only_in_SoI['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame,np.array(only_in_SoI['RAdeg'])*u.deg, np.array(only_in_SoI['DEdeg'])*u.deg)
+            only_in_SoI['VGSR'] = np.array(stream_funcs.vhel_to_vgsr(np.array(only_in_SoI['RAdeg'])*u.deg, np.array(only_in_SoI['DEdeg'])*u.deg, np.array(only_in_SoI['VHel'])*u.km/u.s).value)
+            
             setattr(self, base_name, only_in_SoI)
             print(f'Stars only in SF3: {len(only_in_SoI)}')
 
@@ -349,10 +364,15 @@ class stream:
 
         self.data.desi_data['phi1'], self.data.desi_data['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame, np.array(self.data.desi_data['TARGET_RA'])*u.deg, np.array(self.data.desi_data['TARGET_DEC'])*u.deg)
 
+        self.data.SoI_streamfinder['phi1'], self.data.SoI_streamfinder['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame,np.array(self.data.SoI_streamfinder['RAdeg'])*u.deg, np.array(self.data.SoI_streamfinder['DEdeg'])*u.deg)
+
         self.data.confirmed_sf_and_desi['phi1'], self.data.confirmed_sf_and_desi['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame,np.array(self.data.confirmed_sf_and_desi['TARGET_RA'])*u.deg, np.array(self.data.confirmed_sf_and_desi['TARGET_DEC'])*u.deg)
 
         self.data.confirmed_sf_not_desi['phi1'], self.data.confirmed_sf_not_desi['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame,np.array(self.data.confirmed_sf_not_desi['RAdeg'])*u.deg, np.array(self.data.confirmed_sf_not_desi['DEdeg'])*u.deg)
-
+        
+        # convert sf from VHel to VGSR
+        self.data.confirmed_sf_and_desi['VGSR'] = np.array(stream_funcs.vhel_to_vgsr(np.array(self.data.confirmed_sf_and_desi['TARGET_RA'])*u.deg, np.array(self.data.confirmed_sf_and_desi['TARGET_DEC'])*u.deg, np.array(self.data.confirmed_sf_and_desi['VRAD'])*u.km/u.s).value)
+        self.data.confirmed_sf_not_desi['VGSR'] = np.array(stream_funcs.vhel_to_vgsr(np.array(self.data.confirmed_sf_not_desi['RAdeg'])*u.deg, np.array(self.data.confirmed_sf_not_desi['DEdeg'])*u.deg, np.array(self.data.confirmed_sf_not_desi['VHel'])*u.km/u.s).value)
     def threeD_trim(self):
         """
         Placeholder for 3D trimming logic.
@@ -493,7 +513,7 @@ class StreamPlotter:
                 if showStream:
                     ax.scatter(
                         self.data.cut_confirmed_sf_and_desi[col_x],
-                        self.data.cut_confirmed_sf_and_desi['PARALLAX']-2* self.data.cut_confirmed_sf_and_desi['PARALLAX_ERROR'],
+                        self.data.cut_confirmed_sf_and_desi[col_y],
                         **self.plot_params['sf_in_desi_notsel']
                     )
             if stream_frame:
@@ -575,7 +595,7 @@ class StreamPlotter:
         ax.set_xlabel(label_x)
         stream_funcs.plot_form(ax)  # Make sure this is defined or imported
 
-    def kin_plot(self, showStream=True, background=True, save=False, stream_frame=True):#, galstream=False):
+    def kin_plot(self, showStream=True, show_sf_only=False, background=True, save=False, stream_frame=True):#, galstream=False):
         """
         Plots the stream kinematics either on-sky or stream_frame
         """
@@ -648,7 +668,23 @@ class StreamPlotter:
             #             self.data.SoI_galstream.track.dec,
             #             **self.plot_params['galstream_track']
             #         )
+        if show_sf_only:
 
+            ax[0].scatter(
+                self.data.confirmed_sf_not_desi[col_x_],
+                self.data.confirmed_sf_not_desi[col_y_],
+                **self.plot_params['sf_not_desi']
+            )    
+            ax[1].scatter(
+                self.data.confirmed_sf_not_desi[col_x_],
+                self.data.confirmed_sf_not_desi['pmRA'],
+                **self.plot_params['sf_not_desi']
+            )  
+            ax[2].scatter(
+                self.data.confirmed_sf_not_desi[col_x_],
+                self.data.confirmed_sf_not_desi['pmDE'],
+                **self.plot_params['sf_not_desi']
+            )  
         if background:
             ax[0].scatter(
                 self.data.desi_data[col_x],
@@ -676,11 +712,11 @@ class StreamPlotter:
         ax[0].set_ylim(np.nanmin(np.concatenate([self.data.confirmed_sf_and_desi[col_y_], self.data.cut_confirmed_sf_and_desi[col_y_]])) - 100,
                     np.nanmax(np.concatenate([self.data.confirmed_sf_and_desi[col_y_], self.data.cut_confirmed_sf_and_desi[col_y_]])) + 100)
 
-        ax[1].set_ylim(np.nanmin(np.concatenate([self.data.confirmed_sf_and_desi['PMRA'], self.data.cut_confirmed_sf_and_desi['PMRA']])) - 20,
-                    np.nanmax(np.concatenate([self.data.confirmed_sf_and_desi['PMRA'], self.data.cut_confirmed_sf_and_desi['PMRA']])) + 20)
+        ax[1].set_ylim(np.nanmin(np.concatenate([self.data.confirmed_sf_and_desi['PMRA'], self.data.cut_confirmed_sf_and_desi['PMRA']])) - 7,
+                    np.nanmax(np.concatenate([self.data.confirmed_sf_and_desi['PMRA'], self.data.cut_confirmed_sf_and_desi['PMRA']])) + 7)
 
-        ax[2].set_ylim(np.nanmin(np.concatenate([self.data.confirmed_sf_and_desi['PMDEC'], self.data.cut_confirmed_sf_and_desi['PMDEC']])) - 20,
-                    np.nanmax(np.concatenate([self.data.confirmed_sf_and_desi['PMDEC'], self.data.cut_confirmed_sf_and_desi['PMDEC']])) + 20)
+        ax[2].set_ylim(np.nanmin(np.concatenate([self.data.confirmed_sf_and_desi['PMDEC'], self.data.cut_confirmed_sf_and_desi['PMDEC']])) - 7,
+                    np.nanmax(np.concatenate([self.data.confirmed_sf_and_desi['PMDEC'], self.data.cut_confirmed_sf_and_desi['PMDEC']])) + 7)
         ax[0].legend(loc='upper left', ncol=4)
         ax[0].set_ylabel(label_y)
         ax[1].set_ylabel(r'$\mu_{\alpha}$ [mas/yr]')
@@ -689,3 +725,57 @@ class StreamPlotter:
         stream_funcs.plot_form(ax[0])  
         stream_funcs.plot_form(ax[1]) 
         stream_funcs.plot_form(ax[2])
+
+    def feh_plot(self, showStream=True, show_sf_only=False, background=True, save=False, stream_frame=True):
+        """
+        Plots the stream metallicity either on-sky or stream_frame
+        """
+        if stream_frame:
+            col_x = 'phi1'
+            col_x_ = 'phi1'
+            label_x = r'$\phi_1$'
+            col_y = 'FEH'
+            col_y_ = 'FEH'
+            label_y = r'[Fe/H]'
+        else:
+            col_x = 'TARGET_RA'
+            col_x_ = 'RAdeg'
+            col_y = 'FEH'
+            col_y_ = 'FEH'
+            label_x = 'RA (deg)'
+            label_y = r'[Fe/H]'
+        fig, ax = plt.subplots(figsize=(10, 5))
+        if showStream:
+            ax.scatter(
+                self.data.confirmed_sf_and_desi[col_x],
+                self.data.confirmed_sf_and_desi[col_y],
+                **self.plot_params['sf_in_desi']
+            )
+            # WIP, option to show sf not in desi
+            if hasattr(self.data, 'cut_confirmed_sf_and_desi'):
+                if showStream:
+                    ax.scatter(
+                        self.data.cut_confirmed_sf_and_desi[col_x],
+                        self.data.cut_confirmed_sf_and_desi[col_y_],
+                        **self.plot_params['sf_in_desi_notsel']
+                    )
+        if show_sf_only:
+            ax.scatter(
+                self.data.confirmed_sf_not_desi[col_x_],
+                self.data.confirmed_sf_not_desi[col_y_],
+                **self.plot_params['sf_not_desi']
+            )
+        if background:
+            ax.scatter(
+                self.data.desi_data[col_x],
+                self.data.desi_data[col_y],
+                **self.plot_params['background']
+            )
+        
+        ax.set_ylim(-4, 0.5)
+        ax.legend(loc='upper left', ncol=4)
+        ax.set_ylabel(label_y)
+        ax.set_xlabel(label_x)
+        stream_funcs.plot_form(ax) 
+
+        return fig, ax
