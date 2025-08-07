@@ -984,7 +984,8 @@ class StreamPlotter:
         stream_funcs.plot_form(ax)
 
     def sixD_plot(self, showStream=True, show_sf_only=False, background=True, save=False, stream_frame=True, galstream=False, show_cut=False, 
-                  show_initial_splines=False, show_optimized_splines=False, show_mcmc_splines=False, show_sf_errors=True):
+                  show_initial_splines=False, show_optimized_splines=False, show_mcmc_splines=False, show_sf_errors=True, 
+                  show_membership_prob=False, stream_prob=None, min_prob=0.5):
         """
         Plots the stream phi1 vs phi2, vgsr, pmra, pmdec, and feh
         
@@ -1000,6 +1001,12 @@ class StreamPlotter:
             Whether to show MCMC results splines in blue. Default is False.
         show_sf_errors : bool, optional
             Whether to show error bars on StreamFinder stars. Default is True.
+        show_membership_prob : bool, optional
+            Whether to plot high membership probability stars with special styling. Default is False.
+        stream_prob : array-like, optional
+            Array of membership probabilities for DESI stars. Required if show_membership_prob=True.
+        min_prob : float, optional
+            Minimum membership probability threshold for highlighting stars. Default is 0.5.
         """
         if stream_frame:
             col_x = 'phi1'
@@ -1009,8 +1016,10 @@ class StreamPlotter:
             col_x = 'TARGET_RA'
             col_x_ = 'RAdeg'
             label_x = 'RA (deg)'
-
-        fig, ax = plt.subplots(5, 1, figsize=(10, 15))
+        if show_membership_prob:
+            fig, ax = plt.subplots(5, 1, figsize=(15, 15))
+        else:
+            fig, ax = plt.subplots(5, 1, figsize=(10, 15))
         
         # Plot 1: phi2 vs phi1 (or DEC vs RA)
         if stream_frame:
@@ -1188,6 +1197,180 @@ class StreamPlotter:
                 self.data.desi_data['FEH'],
                 **self.plot_params['background']
             )
+        
+        # Plot membership probability stars if requested
+        if show_membership_prob and stream_prob is not None:
+            import matplotlib.cm as cm
+            import matplotlib.colors as colors
+            
+            # Validate stream_prob length matches DESI data
+            if len(stream_prob) != len(self.data.desi_data):
+                raise ValueError(f"stream_prob length ({len(stream_prob)}) must match DESI data length ({len(self.data.desi_data)})")
+            
+            # Get high probability stars
+            high_prob_mask = stream_prob >= min_prob
+            high_prob_indices = np.where(high_prob_mask)[0]
+            
+            if len(high_prob_indices) > 0:
+                # Create colormap for membership probabilities (viridis from min_prob to 1)
+                norm = colors.Normalize(vmin=min_prob, vmax=1.0)
+                cmap = cm.viridis
+                
+                # Plot high probability DESI stars as circles with viridis colormap
+                scatter_params = {
+                    'marker': 'o',
+                    's': 25,
+                    'c': stream_prob[high_prob_indices],
+                    'cmap': 'viridis',
+                    'norm': norm,
+                    'edgecolor': 'black',
+                    'linewidth': 0.5,
+                    'alpha': 0.8,
+                    'zorder': 6,
+                    'label': f'High Prob Stars (≥{min_prob:.1f})'
+                }
+                
+                # Plot on each subplot
+                ax[0].scatter(
+                    self.data.desi_data[col_x].iloc[high_prob_indices],
+                    self.data.desi_data[col_y0].iloc[high_prob_indices],
+                    **scatter_params
+                )
+                ax[1].scatter(
+                    self.data.desi_data[col_x].iloc[high_prob_indices],
+                    self.data.desi_data['VGSR'].iloc[high_prob_indices],
+                    **{k: v for k, v in scatter_params.items() if k != 'label'}
+                )
+                ax[2].scatter(
+                    self.data.desi_data[col_x].iloc[high_prob_indices],
+                    self.data.desi_data['PMRA'].iloc[high_prob_indices],
+                    **{k: v for k, v in scatter_params.items() if k != 'label'}
+                )
+                ax[3].scatter(
+                    self.data.desi_data[col_x].iloc[high_prob_indices],
+                    self.data.desi_data['PMDEC'].iloc[high_prob_indices],
+                    **{k: v for k, v in scatter_params.items() if k != 'label'}
+                )
+                ax[4].scatter(
+                    self.data.desi_data[col_x].iloc[high_prob_indices],
+                    self.data.desi_data['FEH'].iloc[high_prob_indices],
+                    **{k: v for k, v in scatter_params.items() if k != 'label'}
+                )
+                
+                # Add colorbar to the far right of all plots
+                # Add colorbar to the overall figure instead of individual subplot
+                # If ax is an array of Axes (like from plt.subplots)
+                sm = cm.ScalarMappable(norm=norm, cmap=cmap)
+                sm.set_array([])
+
+                # Ensure ax is a flat list of axes
+                if isinstance(ax, np.ndarray):
+                    ax = ax.ravel()
+
+                # Position colorbar next to all subplots
+                cbar = fig.colorbar(sm, ax=ax, pad=0.02, aspect=50, shrink=1.0, location='right')
+                cbar.set_label('Membership Probability', rotation=270, labelpad=15)
+            
+            # Modify StreamFinder star styling when membership prob is shown
+            if showStream:
+                # Calculate membership probabilities for StreamFinder stars if possible
+                sf_in_desi_indices = self.data.confirmed_sf_and_desi.index
+                desi_indices = self.data.desi_data.index
+                
+                # Find which DESI indices correspond to SF stars
+                sf_desi_mask = desi_indices.isin(sf_in_desi_indices)
+                sf_prob_values = stream_prob[sf_desi_mask]
+                
+                # Determine colors for SF stars based on membership probability
+                sf_high_prob_mask = sf_prob_values >= min_prob
+                
+                # Override existing StreamFinder star plots with new styling
+                sf_diamond_params_high = {
+                    'marker': 'D',
+                    's': 40,
+                    'c': sf_prob_values[sf_high_prob_mask],
+                    'cmap': 'viridis',
+                    'norm': norm,
+                    'edgecolor': 'black',
+                    'linewidth': 1,
+                    'alpha': 1.0,
+                    'zorder': 7,
+                }
+                
+                sf_diamond_params_low = {
+                    'marker': 'D',
+                    's': 40,
+                    'color': 'black',
+                    'edgecolor': 'black',
+                    'linewidth': 1,
+                    'alpha': 1.0,
+                    'zorder': 7,
+                }
+                
+                # Get high and low probability SF star indices
+                sf_indices_high = sf_in_desi_indices[sf_high_prob_mask]
+                sf_indices_low = sf_in_desi_indices[~sf_high_prob_mask]
+                
+                # Plot high probability SF stars with colormap
+                if len(sf_indices_high) > 0:
+                    sf_data_high = self.data.confirmed_sf_and_desi.loc[sf_indices_high]
+                    
+                    ax[0].scatter(
+                        sf_data_high[col_x],
+                        sf_data_high[col_y0],
+                        **sf_diamond_params_high
+                    )
+                    ax[1].scatter(
+                        sf_data_high[col_x],
+                        sf_data_high['VGSR'],
+                        **{k: v for k, v in sf_diamond_params_high.items() if k != 'label'}
+                    )
+                    ax[2].scatter(
+                        sf_data_high[col_x],
+                        sf_data_high['PMRA'],
+                        **{k: v for k, v in sf_diamond_params_high.items() if k != 'label'}
+                    )
+                    ax[3].scatter(
+                        sf_data_high[col_x],
+                        sf_data_high['PMDEC'],
+                        **{k: v for k, v in sf_diamond_params_high.items() if k != 'label'}
+                    )
+                    ax[4].scatter(
+                        sf_data_high[col_x],
+                        sf_data_high['FEH'],
+                        **{k: v for k, v in sf_diamond_params_high.items() if k != 'label'}
+                    )
+                
+                # Plot low probability SF stars as black diamonds
+                if len(sf_indices_low) > 0:
+                    sf_data_low = self.data.confirmed_sf_and_desi.loc[sf_indices_low]
+                    
+                    ax[0].scatter(
+                        sf_data_low[col_x],
+                        sf_data_low[col_y0],
+                        **sf_diamond_params_low,
+                        label=f'SF Stars (<{min_prob:.1f})'
+                    )
+                    ax[1].scatter(
+                        sf_data_low[col_x],
+                        sf_data_low['VGSR'],
+                        **sf_diamond_params_low
+                    )
+                    ax[2].scatter(
+                        sf_data_low[col_x],
+                        sf_data_low['PMRA'],
+                        **sf_diamond_params_low
+                    )
+                    ax[3].scatter(
+                        sf_data_low[col_x],
+                        sf_data_low['PMDEC'],
+                        **sf_diamond_params_low
+                    )
+                    ax[4].scatter(
+                        sf_data_low[col_x],
+                        sf_data_low['FEH'],
+                        **sf_diamond_params_low
+                    )
 
         # Set y-axis limits based on stream data if available
         if showStream and hasattr(self.data, 'confirmed_sf_and_desi') and len(self.data.confirmed_sf_and_desi) > 0:
