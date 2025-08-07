@@ -15,7 +15,6 @@ import importlib
 import stream_functions as stream_funcs
 import emcee
 import corner
-from astroquery.gaia import Gaia
 from astropy.table import Table, join
 from collections import OrderedDict
 import time
