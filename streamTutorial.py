@@ -982,7 +982,8 @@ class StreamPlotter:
         ax.invert_yaxis()
         stream_funcs.plot_form(ax)
 
-    def sixD_plot(self, showStream=True, show_sf_only=False, background=True, save=False, stream_frame=True, galstream=False, show_cut=False):
+    def sixD_plot(self, showStream=True, show_sf_only=False, background=True, save=False, stream_frame=True, galstream=False, show_cut=False, 
+                  show_initial_splines=False, show_optimized_splines=False, show_sf_errors=True):
         """
         Plots the stream phi1 vs phi2, vgsr, pmra, pmdec, and feh
         
@@ -990,6 +991,12 @@ class StreamPlotter:
         -----------
         show_cut : bool, optional
             Whether to show cut stars (red X markers). Default is True.
+        show_initial_splines : bool, optional
+            Whether to show initial guess splines in black. Default is False.
+        show_optimized_splines : bool, optional
+            Whether to show optimized splines in red. Default is False.
+        show_sf_errors : bool, optional
+            Whether to show error bars on StreamFinder stars. Default is True.
         """
         if stream_frame:
             col_x = 'phi1'
@@ -1013,31 +1020,81 @@ class StreamPlotter:
             label_y0 = 'DEC (deg)'
             
         if showStream:
-            ax[0].scatter(
-                self.data.confirmed_sf_and_desi[col_x],
-                self.data.confirmed_sf_and_desi[col_y0],
-                **self.plot_params['sf_in_desi']
-            )
-            ax[1].scatter(
-                self.data.confirmed_sf_and_desi[col_x],
-                self.data.confirmed_sf_and_desi['VGSR'],
-                **self.plot_params['sf_in_desi']
-            )
-            ax[2].scatter(
-                self.data.confirmed_sf_and_desi[col_x],
-                self.data.confirmed_sf_and_desi['PMRA'],
-                **self.plot_params['sf_in_desi']
-            )
-            ax[3].scatter(
-                self.data.confirmed_sf_and_desi[col_x],
-                self.data.confirmed_sf_and_desi['PMDEC'],
-                **self.plot_params['sf_in_desi']
-            )
-            ax[4].scatter(
-                self.data.confirmed_sf_and_desi[col_x],
-                self.data.confirmed_sf_and_desi['FEH'],
-                **self.plot_params['sf_in_desi']
-            )
+            if show_sf_errors:
+                # Plot with error bars - create compatible parameters for errorbar
+                # Only use parameters that work with both errorbar and scatter
+                errorbar_params = {
+                    'color': self.plot_params['sf_in_desi'].get('color', 'green'),
+                    'label': self.plot_params['sf_in_desi'].get('label', 'SF $\\in$ DESI'),
+                    'zorder': self.plot_params['sf_in_desi'].get('zorder', 5),
+                    'alpha': self.plot_params['sf_in_desi'].get('alpha', 1.0),
+                    'markersize': 6,  # Use markersize instead of s
+                    'markeredgecolor': self.plot_params['sf_in_desi'].get('edgecolor', 'k'),
+                    'ecolor': self.plot_params['sf_in_desi'].get('edgecolor', 'k'),
+                    'capsize': 2,
+                }
+                
+                ax[0].errorbar(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi[col_y0],
+                    xerr=None, yerr=None,
+                    fmt='d', **errorbar_params  # Use diamond marker like the original
+                )
+                # VGSR with error bars
+                ax[1].errorbar(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi['VGSR'],
+                    xerr=None, yerr=self.data.confirmed_sf_and_desi['VRAD_ERR'],
+                    fmt='d', **errorbar_params
+                )
+                # PMRA with error bars
+                ax[2].errorbar(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi['PMRA'],
+                    xerr=None, yerr=self.data.confirmed_sf_and_desi['PMRA_ERROR'],
+                    fmt='d', **errorbar_params
+                )
+                # PMDEC with error bars
+                ax[3].errorbar(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi['PMDEC'],
+                    xerr=None, yerr=self.data.confirmed_sf_and_desi['PMDEC_ERROR'],
+                    fmt='d', **errorbar_params
+                )
+                # FEH with error bars
+                ax[4].errorbar(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi['FEH'],
+                    xerr=None, yerr=self.data.confirmed_sf_and_desi['FEH_ERR'],
+                    fmt='d', **errorbar_params
+                )
+            else:
+                # Plot without error bars (original behavior)
+                ax[0].scatter(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi[col_y0],
+                    **self.plot_params['sf_in_desi']
+                )
+                ax[1].scatter(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi['VGSR'],
+                    **self.plot_params['sf_in_desi']
+                )
+                ax[2].scatter(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi['PMRA'],
+                    **self.plot_params['sf_in_desi']
+                )
+                ax[3].scatter(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi['PMDEC'],
+                    **self.plot_params['sf_in_desi']
+                )
+                ax[4].scatter(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi['FEH'],
+                    **self.plot_params['sf_in_desi']
+                )
             
             if hasattr(self.data, 'cut_confirmed_sf_and_desi') and show_cut:
                 ax[0].scatter(
@@ -1152,7 +1209,90 @@ class StreamPlotter:
         # Set metallicity limits
         ax[4].set_ylim(-4, -0.5)
         
+        # Plot splines if requested and available
+        if (show_initial_splines or show_optimized_splines) and stream_frame and self.mcmeta is not None:
+            # Create phi1 range for spline plotting
+            phi1_min = ax[1].get_xlim()[0]
+            phi1_max = ax[1].get_xlim()[1]
+            phi1_spline_plot = np.linspace(phi1_min, phi1_max, 100)
+            
+            # Plot initial guess splines in black
+            if show_initial_splines:
+                if hasattr(self.mcmeta, 'phi1_spline_points'):
+                    try:
+                        # VGSR spline
+                        vgsr_initial = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            self.mcmeta.initial_params['vgsr_spline_points'], k=2
+                        )
+                        ax[1].plot(phi1_spline_plot, vgsr_initial, 'k-', linewidth=2, 
+                                  label='Initial Spline', alpha=0.8)
+                        
+                        # PMRA spline
+                        pmra_initial = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            self.mcmeta.initial_params['pmra_spline_points'], k=2
+                        )
+                        ax[2].plot(phi1_spline_plot, pmra_initial, 'k-', linewidth=2, 
+                                  label='Initial Spline', alpha=0.8)
+                        
+                        # PMDEC spline
+                        pmdec_initial = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            self.mcmeta.initial_params['pmdec_spline_points'], k=2
+                        )
+                        ax[3].plot(phi1_spline_plot, pmdec_initial, 'k-', linewidth=2, 
+                                  label='Initial Spline', alpha=0.8)
+                        
+                        # FEH constant line
+                        feh_initial = np.full_like(phi1_spline_plot, self.mcmeta.initial_params['feh1'])
+                        ax[4].plot(phi1_spline_plot, feh_initial, 'k-', linewidth=2, 
+                                  label='Initial [Fe/H]', alpha=0.8)
+                    except Exception as e:
+                        print(f"Warning: Could not plot initial splines: {e}")
+            
+            # Plot optimized splines in red
+            if show_optimized_splines and hasattr(self.mcmeta, 'optimized_params'):
+                if hasattr(self.mcmeta, 'phi1_spline_points'):
+                    try:
+                        # VGSR spline
+                        vgsr_optimized = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            self.mcmeta.optimized_params['vgsr_spline_points'], k=2
+                        )
+                        ax[1].plot(phi1_spline_plot, vgsr_optimized, 'r-', linewidth=2, 
+                                  label='Optimized Spline', alpha=0.8)
+                        
+                        # PMRA spline
+                        pmra_optimized = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            self.mcmeta.optimized_params['pmra_spline_points'], k=2
+                        )
+                        ax[2].plot(phi1_spline_plot, pmra_optimized, 'r-', linewidth=2, 
+                                  label='Optimized Spline', alpha=0.8)
+                        
+                        # PMDEC spline
+                        pmdec_optimized = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            self.mcmeta.optimized_params['pmdec_spline_points'], k=2
+                        )
+                        ax[3].plot(phi1_spline_plot, pmdec_optimized, 'r-', linewidth=2, 
+                                  label='Optimized Spline', alpha=0.8)
+                        
+                        # FEH constant line
+                        feh_optimized = np.full_like(phi1_spline_plot, self.mcmeta.optimized_params['feh1'])
+                        ax[4].plot(phi1_spline_plot, feh_optimized, 'r-', linewidth=2, 
+                                  label='Optimized [Fe/H]', alpha=0.8)
+                    except Exception as e:
+                        print(f"Warning: Could not plot optimized splines: {e}")
+        
         # Labels and formatting
+        if show_initial_splines or show_optimized_splines:
+            # Add legends to kinematic plots if splines are shown
+            for i in [1]:
+                if ax[i].get_lines():  # Only add legend if there are lines to show
+                    ax[i].legend(loc='best', fontsize='small')
+        
         ax[0].legend(loc='upper left', ncol=4)
         ax[0].set_ylabel(label_y0)
         ax[1].set_ylabel(r'V$_{GSR}$ (km/s)')
@@ -1460,6 +1600,3 @@ class MCMeta:
             StreamPlotter: A plotter object that can access both stream and MCMeta functionality.
         """
         return StreamPlotter(self, save_dir=save_dir)
-
-
-
