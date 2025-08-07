@@ -472,16 +472,19 @@ class stream:
             interpolate_distances = interp1d(self.data.SoI_galstream.gal_phi1, self.data.SoI_galstream.track.distance.value*1000, kind='linear', fill_value='extrapolate')
             distance_sf = interpolate_distances(self.data.confirmed_sf_and_desi['phi1'])
             distance_desi = interpolate_distances(self.data.desi_data['phi1'])
+            distance_cut_sf = interpolate_distances(self.data.cut_confirmed_sf_and_desi['phi1']) if hasattr(self.data, 'cut_confirmed_sf_and_desi') else None
             print('Using distance gradient')
         elif not self.data.confirmed_sf_and_desi.empty:
             distance_sf = 1/np.nanmean(self.data.confirmed_sf_and_desi['PARALLAX'])*1000
             distance_desi = distance_sf
+            distance_cut_sf = 1/np.nanmean(self.data.cut_confirmed_sf_and_desi['PARALLAX'])*1000 if hasattr(self.data, 'cut_confirmed_sf_and_desi') else None
             print(f'set distance to {distance_sf} pc')
         else:
             print('No distance for the stream, go look in literature and set manually with self.min_dist = XX') #kpc)
         self.data.desi_colour_idx, self.data.desi_abs_mag, self.data.desi_r_mag = stream_funcs.get_colour_index_and_abs_mag(self.data.desi_data['EBV'], self.data.desi_data['FLUX_G'], self.data.desi_data['FLUX_R'], distance_desi)
         self.data.sf_colour_idx, self.data.sf_abs_mag, self.data.sf_r_mag = stream_funcs.get_colour_index_and_abs_mag(self.data.confirmed_sf_and_desi['EBV'], self.data.confirmed_sf_and_desi['FLUX_G'], self.data.confirmed_sf_and_desi['FLUX_R'], distance_sf)
-
+        if hasattr(self.data, 'cut_confirmed_sf_and_desi'):
+                self.data.cut_sf_colour_idx, self.data.cut_sf_abs_mag, self.data.cut_sf_r_mag = stream_funcs.get_colour_index_and_abs_mag(self.data.cut_confirmed_sf_and_desi['EBV'], self.data.cut_confirmed_sf_and_desi['FLUX_G'], self.data.cut_confirmed_sf_and_desi['FLUX_R'], distance_cut_sf)
         g_r_color_dif = self.dotter_g_mp - self.dotter_r_mp
         sorted_indices = np.argsort(self.dotter_r_mp)
         sorted_dotter_r_mp = self.dotter_r_mp[sorted_indices]
@@ -887,7 +890,7 @@ class StreamPlotter:
 
         return fig, ax
 
-    def iso_plot(self, showStream=True, show_sf_only=False, background=True, save=False, absolute=True, BHB=True, bhb_wiggle=False):
+    def iso_plot(self, wiggle = 0.18, showStream=True, show_sf_only=False, background=True, save=False, absolute=True, BHB=True, bhb_wiggle=True):
         """
         Plotting the isochrone and stars
         """
@@ -909,7 +912,17 @@ class StreamPlotter:
     
         ax.plot(self.stream.isochrone_fit(self.stream.dotter_r_mp), self.stream.dotter_r_mp,
                 c='b', ls='-.')
-        
+        ax.plot(self.stream.isochrone_fit(self.stream.dotter_r_mp)+wiggle, self.stream.dotter_r_mp,
+                c='b', ls='dotted', alpha=0.5, label='Colour wiggle')
+        ax.plot(self.stream.isochrone_fit(self.stream.dotter_r_mp)-wiggle, self.stream.dotter_r_mp,
+                c='b', ls='dotted', alpha=0.5)
+        if hasattr(self.data, 'cut_confirmed_sf_and_desi'):
+                if showStream:
+                    ax.scatter(
+                        self.data.cut_sf_colour_idx,
+                        self.data.cut_sf_abs_mag if absolute else self.data.cut_sf_r_mag,
+                        **self.plot_params['sf_in_desi_notsel']
+                    )
         # Hard coded
         if BHB:
 
@@ -929,10 +942,10 @@ class StreamPlotter:
             if bhb_wiggle:
                 bhb_color_wiggle = 0.4
                 bhb_abs_mag_wiggle = 0.1
-                ax.plot(des_m92_hb_g - des_m92_hb_r, des_m92_hb_r-bhb_color_wiggle, 'r--', alpha=0.5)
-                ax.plot(des_m92_hb_g - des_m92_hb_r, des_m92_hb_r+bhb_color_wiggle, 'r--', alpha=0.5)
-                ax.plot(des_m92_hb_g - des_m92_hb_r+bhb_abs_mag_wiggle, des_m92_hb_r, 'r-.', alpha=0.5)
-                ax.plot(des_m92_hb_g - des_m92_hb_r-bhb_abs_mag_wiggle, des_m92_hb_r, 'r-.', alpha=0.5)
+                ax.plot(des_m92_hb_g - des_m92_hb_r, des_m92_hb_r-bhb_color_wiggle, 'b:', alpha=0.5)
+                ax.plot(des_m92_hb_g - des_m92_hb_r, des_m92_hb_r+bhb_color_wiggle, 'b:', alpha=0.5)
+                ax.plot(des_m92_hb_g - des_m92_hb_r+bhb_abs_mag_wiggle, des_m92_hb_r, 'b:', alpha=0.5)
+                ax.plot(des_m92_hb_g - des_m92_hb_r-bhb_abs_mag_wiggle, des_m92_hb_r, 'b:', alpha=0.5)
         # Hard coded
         
         ax.legend(loc='lower left')
@@ -943,3 +956,21 @@ class StreamPlotter:
         ax.invert_yaxis()
         stream_funcs.plot_form(ax)
                 
+class MCMeta:
+    """
+    For creating and plotting a spline track of the stream.
+    """
+    def __init__(self, no_of_spline_points, stream_object):
+        self.stream = stream_object
+        self.no_of_spline_points = no_of_spline_points
+
+        if self.no_of_spline_points == 1:
+            self.spline_k = 1
+        elif self.no_of_spline_points > 3:
+            self.spline_k = 3
+        else:
+            self.spline_k = self.no_of_spline_points - 1
+
+        print('Making intitial guess based of galstream and STREAMFINDER...')
+        
+    
