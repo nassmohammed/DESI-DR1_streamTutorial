@@ -1894,16 +1894,15 @@ def spline_memprob_1D(theta, spline_x_points, pstream_spline_x_points, lsig_vgsr
     return p
 
 
-def spline_lnprob_1D(theta, prior, spline_x_points, pstream_spline_x_points, lsigmav_spline_x_points, vgsr, vgsr_err, feh, feh_err, pmra, pmra_err, pmdec, pmdec_err, phi1,
+def spline_lnprob_1D(theta, prior, spline_x_points, vgsr, vgsr_err, feh, feh_err, pmra, pmra_err, pmdec, pmdec_err, phi1,
                      trunc_fit = False, assert_prior = False, feh_fit=True, k=2, reshape_arr_shape=None, vgsr_trunc=[-np.inf, np.inf], feh_trunc=[-np.inf, np.inf], pmra_trunc=[-np.inf, np.inf], pmdec_trunc=[-np.inf, np.inf]):
     """ Likelihood and Prior """
     
     reshaped_theta = reshape_arr(theta, reshape_arr_shape)
     
-    # params
-    #pstream, \
-    pstream_spline_points, \
-    vgsr_spline_points, lsigv_spline_points, \
+    # params - pstream and lsigv are now constant along the stream like feh1
+    pstream, \
+    vgsr_spline_points, lsigv, \
     feh1, lsigfeh, \
     pmra_spline_points, lsigpmra, \
     pmdec_spline_points, lsigpmdec, \
@@ -1912,21 +1911,17 @@ def spline_lnprob_1D(theta, prior, spline_x_points, pstream_spline_x_points, lsi
     if feh_fit == False:
         feh1_min, feh1_max, lsigfeh_min, lsigfeh_max, bfeh_min, bfeh_max = -np.inf, np.inf, -np.inf, np.inf, -np.inf, np.inf
         
-    pstream_indices = np.arange(1, len(pstream_spline_x_points) + 1).astype(str)
     indices = np.arange(1, len(spline_x_points) + 1).astype(str)
-    lsigv_indices = np.arange(1, len(lsigmav_spline_x_points) + 1).astype(str)
     # Generate labels
-    pstream_labels = np.char.add('pstream', pstream_indices)
     velocity_labels = np.char.add('v', indices)
     pmra_labels = np.char.add('pmra', indices)
     pmdec_labels = np.char.add('pmdec', indices)
-    lsigv_labels = np.char.add('lsigv', lsigv_indices)
     
-    # Insert labels at the correct positions
+    # Insert labels at the correct positions - pstream and lsigv are now single parameters
     theta_labels = (
-        pstream_labels.tolist() +                           # Start with lpstream labels
+        ['pstream'] +                                        # Single pstream parameter
         velocity_labels.tolist() +                           # Insert velocity labels
-        lsigv_labels.tolist() +     
+        ['lsigv'] +                                          # Single lsigv parameter
         ['feh1', 'lsigfeh'] +
         pmra_labels.tolist() +                               # Insert pmra labels
         ['lsigpmra'] +       # Existing labels between 'lsigpmra' and 'lsigpmdec'
@@ -1944,24 +1939,12 @@ def spline_lnprob_1D(theta, prior, spline_x_points, pstream_spline_x_points, lsi
 
             return -1e10  # outside of prior, return a tiny number   
         
-    # Convert pstream range from (0,1) to (-inf, inf)
-    tan_pstream_spline_points = tan_transform(pstream_spline_points)
-    if isinstance(tan_pstream_spline_points, np.ndarray): 
-        if len(tan_pstream_spline_points) > 3:
-            lpstream = np.log(atan_inverse(apply_spline(phi1,pstream_spline_x_points,tan_pstream_spline_points, k=3)))
-        elif len(tan_pstream_spline_points) <= 3:
-            lpstream = np.log(atan_inverse(apply_spline(phi1,pstream_spline_x_points,tan_pstream_spline_points, k=len(tan_pstream_spline_points)-1)))
-    elif isinstance(tan_pstream_spline_points, np.float64):
-        lpstream = np.log(atan_inverse(tan_pstream_spline_points))
+    # Convert pstream range from (0,1) to (-inf, inf) - now constant along stream
+    tan_pstream = tan_transform(pstream)
+    lpstream = np.log(atan_inverse(tan_pstream))
 
-    # Calculate lnprob for vgsr, pmra, pmdec
-    if isinstance(lsigv_spline_points, np.ndarray):
-        if len(lsigv_spline_points) > 3:
-            lsigv = np.log(10**apply_spline(phi1, lsigmav_spline_x_points, lsigv_spline_points, k=3))
-        elif len(lsigv_spline_points) <= 3:
-            lsigv = np.log(10**apply_spline(phi1, lsigmav_spline_x_points, lsigv_spline_points, k=len(lsigv_spline_points)-1))
-    elif isinstance(lsigv_spline_points, np.float64):
-        lsigv = np.log(10**lsigv_spline_points)
+    # Calculate lnprob for vgsr, pmra, pmdec - lsigv now constant along stream
+    lsigv_scaled = np.log(10**lsigv)
     
     if np.any(1-(np.e**lpstream) <= 0):
         print('bad pstream')
