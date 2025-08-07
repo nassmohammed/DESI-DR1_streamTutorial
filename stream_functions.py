@@ -1799,3 +1799,214 @@ def print_meds(stream_dir):
         else:
             print("{:<10} {:>10.3f} {:>10.3f} {:>10.3f}".format(label, v, em[label], ep[label]))
         i += 1
+
+
+
+def spline_memprob_1D(theta, spline_x_points, pstream_spline_x_points, lsig_vgsr_spline_points, vgsr, vgsr_err, feh, feh_err, pmra, pmra_err, pmdec, pmdec_err, phi1,
+                      trunc_fit=True, reshape_arr_shape=None, k=2, vgsr_trunc=[-np.inf, np.inf], feh_trunc=[-np.inf, np.inf], pmra_trunc=[-np.inf, np.inf], pmdec_trunc=[-np.inf, np.inf]):
+    """ Calculates membership probability based on inputs
+    
+    Parameters:
+    theta - array. model parameters
+    vgsr, pmra, pmdec, phi1 - floats. Respective values
+    
+    Return:
+    float. The membership probability
+    """
+    reshaped_theta = reshape_arr(theta, reshape_arr_shape)
+
+    # params
+    pstream_spline_points, \
+    vgsr_spline_points, lsigv_spline_points, \
+    feh1, lsigfeh, \
+    pmra_spline_points, lsigpmra, \
+    pmdec_spline_points, lsigpmdec, \
+    bv, lsigbv, bfeh, lsigbfeh, bpmra, lsigbpmra, bpmdec, lsigbpmdec = reshaped_theta
+    
+    tan_pstream_spline_points = tan_transform(pstream_spline_points)
+    if isinstance(tan_pstream_spline_points, np.ndarray): 
+        if len(tan_pstream_spline_points) > 3:
+            pstream = atan_inverse(apply_spline(phi1,pstream_spline_x_points,tan_pstream_spline_points, k=3))
+        elif len(tan_pstream_spline_points) <= 3:
+            pstream = atan_inverse(apply_spline(phi1,pstream_spline_x_points,tan_pstream_spline_points, k=len(tan_pstream_spline_points)-1))
+    elif isinstance(tan_pstream_spline_points, np.float64): 
+        pstream = atan_inverse(tan_pstream_spline_points)
+        
+    if isinstance(lsigv_spline_points, np.ndarray):
+        if len(lsigv_spline_points) > 3:
+            lsigv = apply_spline(phi1, lsig_vgsr_spline_points, lsigv_spline_points, k=3)
+        elif len(lsigv_spline_points) <= 3:
+            lsigv = apply_spline(phi1, lsig_vgsr_spline_points, lsigv_spline_points, k=len(lsigv_spline_points)-1)
+    elif isinstance(lsigv_spline_points, np.float64):
+        lsigv = lsigv_spline_points
+        
+    scale_stream_vgsr = np.sqrt(vgsr_err**2 + (10**lsigv)**2)
+    scale_bg_vgsr = np.sqrt(vgsr_err**2 + (10**lsigbv)**2)
+    scale_stream_feh = np.sqrt(feh_err**2 + (10**lsigfeh)**2)
+    scale_bg_feh = np.sqrt(feh_err**2 + (10**lsigbfeh)**2)
+    scale_stream_pmra = np.sqrt(pmra_err**2 + (10**lsigpmra)**2)
+    scale_bg_pmra = np.sqrt(pmra_err**2 + (10**lsigbpmra)**2)
+    scale_stream_pmdec = np.sqrt(pmdec_err**2 + (10**lsigpmdec)**2)
+    scale_bg_pmdec = np.sqrt(pmdec_err**2 + (10**lsigbpmdec)**2)
+        
+    if trunc_fit == False:
+        ## Compute log likelihood in v_gsr
+        lstream_v = stats.norm.logpdf(vgsr, loc=apply_spline(phi1,spline_x_points,vgsr_spline_points, k=k), scale=scale_stream_vgsr)
+        lbg_v = stats.norm.logpdf(vgsr, loc=bv, scale=scale_bg_vgsr)
+
+        ## Compute log likelihood in feh
+        lstream_feh = stats.norm.logpdf(feh, loc=feh1, scale=scale_stream_feh)
+        lbg_feh = stats.norm.logpdf(feh, loc=bfeh, scale=scale_bg_feh)
+        
+        lstream_pmra = stats.norm.logpdf(pmra, loc=apply_spline(phi1,spline_x_points,pmra_spline_points, k=k), scale=scale_stream_pmra)
+        lbg_pmra = stats.norm.logpdf(pmra, loc=bpmra, scale=scale_bg_pmra)
+        
+        lstream_pmdec = stats.norm.logpdf(pmdec, loc=apply_spline(phi1,spline_x_points,pmdec_spline_points, k=k), scale=scale_stream_pmdec)
+        lbg_pmdec = stats.norm.logpdf(pmdec, loc=bpmdec, scale=scale_bg_pmdec)
+    
+    elif trunc_fit == True:
+        # Compute standardized bounds for truncnorm
+        lvgsr_cdf_dif = np.log(stats.norm.cdf(vgsr_trunc[1], loc=bv, scale=scale_bg_vgsr) - stats.norm.cdf(vgsr_trunc[0], loc=bv, scale=scale_bg_vgsr))
+        lstream_v = stats.norm.logpdf(vgsr, loc=apply_spline(phi1, spline_x_points, vgsr_spline_points, k=k), scale=scale_stream_vgsr)
+        lbg_v = stats.norm.logpdf(vgsr, loc=bv, scale=scale_bg_vgsr) - lvgsr_cdf_dif
+        
+        lfeh_cdf_dif = np.log(stats.norm.cdf(feh_trunc[1], loc=bfeh, scale=scale_bg_feh) - stats.norm.cdf(feh_trunc[0], loc=bfeh, scale=scale_bg_feh))
+        lstream_feh = stats.norm.logpdf(feh, loc=feh1, scale=scale_stream_feh)
+        lbg_feh = stats.norm.logpdf(feh, loc=bfeh, scale=scale_bg_feh) - lfeh_cdf_dif
+        
+        lpmra_cdf_dif = np.log(stats.norm.cdf(pmra_trunc[1], loc=bpmra, scale=scale_bg_pmra) - stats.norm.cdf(pmra_trunc[0], loc=bpmra, scale=scale_bg_pmra))
+        lstream_pmra = stats.norm.logpdf(pmra, loc=apply_spline(phi1, spline_x_points, pmra_spline_points, k=k), scale=scale_stream_pmra)
+        lbg_pmra = stats.norm.logpdf(pmra, loc=bpmra, scale=scale_bg_pmra) - lpmra_cdf_dif
+        
+        lpmdec_cdf_dif = np.log(stats.norm.cdf(pmdec_trunc[1], loc=bpmdec, scale=scale_bg_pmdec) - stats.norm.cdf(pmdec_trunc[0], loc=bpmdec, scale=scale_bg_pmdec))
+        lstream_pmdec = stats.norm.logpdf(pmdec, loc=apply_spline(phi1, spline_x_points, pmdec_spline_points, k=k), scale=scale_stream_pmdec)
+        lbg_pmdec = stats.norm.logpdf(pmdec, loc=bpmdec, scale=scale_bg_pmdec) - lpmdec_cdf_dif
+        
+    ## Combine the components
+    lstream = np.log(pstream) + lstream_v + lstream_feh + lstream_pmra + lstream_pmdec
+    lbg = np.log(1-pstream) + lbg_v + lbg_feh + lbg_pmra + lbg_pmdec
+
+    stream = np.exp(lstream)
+    bg = np.exp(lbg)
+    
+    p = stream/(stream+bg)
+    
+    return p
+
+
+def spline_lnprob_1D(theta, prior, spline_x_points, vgsr, vgsr_err, feh, feh_err, pmra, pmra_err, pmdec, pmdec_err, phi1,
+                     trunc_fit = False, assert_prior = False, feh_fit=True, k=2, reshape_arr_shape=None, vgsr_trunc=[-np.inf, np.inf], feh_trunc=[-np.inf, np.inf], pmra_trunc=[-np.inf, np.inf], pmdec_trunc=[-np.inf, np.inf]):
+    """ Likelihood and Prior """
+    
+    reshaped_theta = reshape_arr(theta, reshape_arr_shape)
+    
+    # params - pstream and lsigv are now constant along the stream like feh1
+    pstream, \
+    vgsr_spline_points, lsigv, \
+    feh1, lsigfeh, \
+    pmra_spline_points, lsigpmra, \
+    pmdec_spline_points, lsigpmdec, \
+    bv, lsigbv, bfeh, lsigbfeh, bpmra, lsigbpmra, bpmdec, lsigbpmdec = reshaped_theta
+    
+    if feh_fit == False:
+        feh1_min, feh1_max, lsigfeh_min, lsigfeh_max, bfeh_min, bfeh_max = -np.inf, np.inf, -np.inf, np.inf, -np.inf, np.inf
+        
+    indices = np.arange(1, len(spline_x_points) + 1).astype(str)
+    # Generate labels
+    velocity_labels = np.char.add('v', indices)
+    pmra_labels = np.char.add('pmra', indices)
+    pmdec_labels = np.char.add('pmdec', indices)
+    
+    # Insert labels at the correct positions - pstream and lsigv are now single parameters
+    theta_labels = (
+        ['pstream'] +                                        # Single pstream parameter
+        velocity_labels.tolist() +                           # Insert velocity labels
+        ['lsigv'] +                                          # Single lsigv parameter
+        ['feh1', 'lsigfeh'] +
+        pmra_labels.tolist() +                               # Insert pmra labels
+        ['lsigpmra'] +       # Existing labels between 'lsigpmra' and 'lsigpmdec'
+        pmdec_labels.tolist() +                              # Insert pmdec labels
+        ['lsigpmdec'] +                       # Remaining labels after 'lsigpmdec'
+        ['bv', 'lsigbv', 'bfeh', 'lsigbfeh', 'bpmra', 'lsigbpmra', 'bpmdec', 'lsigbpmdec']
+    )
+
+    for i in range(len(theta)):
+        if (theta[i] < prior[i][0]) or (theta[i] > prior[i][1]):
+            
+            if assert_prior:
+                print(theta[i])
+                print(theta_labels[i])
+
+            return -1e10  # outside of prior, return a tiny number   
+        
+    # Convert pstream range from (0,1) to (-inf, inf) - now constant along stream
+    tan_pstream = tan_transform(pstream)
+    lpstream = np.log(atan_inverse(tan_pstream))
+
+    # Calculate lnprob for vgsr, pmra, pmdec - lsigv now constant along stream
+    lsigv_scaled = np.log(10**lsigv)
+    
+    if np.any(1-(np.e**lpstream) <= 0):
+        print('bad pstream')
+        return -1e10 # bad lpstream spline extrapolation. May have a dip that goes below 0
+
+    if feh_fit:
+        scale_stream_feh = np.sqrt(feh_err**2 + (10**lsigfeh)**2)
+        scale_bg_feh = np.sqrt(feh_err**2 + (10**lsigbfeh)**2)
+        
+    scale_stream_vgsr = np.sqrt(vgsr_err**2 + (10**lsigv)**2)
+    scale_bg_vgsr = np.sqrt(vgsr_err**2 + (10**lsigbv)**2)
+    
+    scale_stream_pmra = np.sqrt(pmra_err**2 + (10**lsigpmra)**2)
+    scale_bg_pmra = np.sqrt(pmra_err**2 + (10**lsigbpmra)**2)
+    
+    scale_stream_pmdec = np.sqrt(pmdec_err**2 + (10**lsigpmdec)**2)
+    scale_bg_pmdec = np.sqrt(pmdec_err**2 + (10**lsigbpmdec)**2)
+    
+    ## Compute log likelihood in feh
+    if trunc_fit == False:
+        ## Compute log likelihood in v_gsr
+        lstream_v = stats.norm.logpdf(vgsr, loc=apply_spline(phi1, spline_x_points, vgsr_spline_points, k=k), scale=scale_stream_vgsr)
+        lbg_v = stats.norm.logpdf(vgsr, loc=bv, scale=scale_bg_vgsr)
+        
+        if feh_fit:
+            lstream_feh = stats.norm.logpdf(feh, loc=feh1, scale=scale_stream_feh)
+            lbg_feh = stats.norm.logpdf(feh, loc=bfeh, scale=scale_bg_feh)
+            
+        lstream_pmra = stats.norm.logpdf(pmra, loc=apply_spline(phi1, spline_x_points, pmra_spline_points, k=k), scale=scale_stream_pmra)
+        lbg_pmra = stats.norm.logpdf(pmra, loc=bpmra, scale=scale_bg_pmra)
+        
+        lstream_pmdec = stats.norm.logpdf(pmdec, loc=apply_spline(phi1, spline_x_points, pmdec_spline_points, k=k), scale=scale_stream_pmdec)
+        lbg_pmdec = stats.norm.logpdf(pmdec, loc=bpmdec, scale=scale_bg_pmdec)
+
+    elif trunc_fit:
+        # Compute standardized bounds for truncnorm
+        lvgsr_cdf_dif = np.log(stats.norm.cdf(vgsr_trunc[1], loc=bv, scale=scale_bg_vgsr) - stats.norm.cdf(vgsr_trunc[0], loc=bv, scale=scale_bg_vgsr))
+        lstream_v = stats.norm.logpdf(vgsr, loc=apply_spline(phi1, spline_x_points, vgsr_spline_points, k=k), scale=scale_stream_vgsr)
+        lbg_v = stats.norm.logpdf(vgsr, loc=bv, scale=scale_bg_vgsr) - lvgsr_cdf_dif
+                
+        if feh_fit:
+            lfeh_cdf_dif = np.log(stats.norm.cdf(feh_trunc[1], loc=bfeh, scale=scale_bg_feh) - stats.norm.cdf(feh_trunc[0], loc=bfeh, scale=scale_bg_feh))
+            lstream_feh = stats.norm.logpdf(feh, loc=feh1, scale=scale_stream_feh)
+            lbg_feh = stats.norm.logpdf(feh, loc=bfeh, scale=scale_bg_feh) - lfeh_cdf_dif
+        
+        lpmra_cdf_dif = np.log(stats.norm.cdf(pmra_trunc[1], loc=bpmra, scale=scale_bg_pmra) - stats.norm.cdf(pmra_trunc[0], loc=bpmra, scale=scale_bg_pmra))
+        lstream_pmra = stats.norm.logpdf(pmra, loc=apply_spline(phi1, spline_x_points, pmra_spline_points, k=k), scale=scale_stream_pmra)
+        lbg_pmra = stats.norm.logpdf(pmra, loc=bpmra, scale=scale_bg_pmra) - lpmra_cdf_dif
+        
+        lpmdec_cdf_dif = np.log(stats.norm.cdf(pmdec_trunc[1], loc=bpmdec, scale=scale_bg_pmdec) - stats.norm.cdf(pmdec_trunc[0], loc=bpmdec, scale=scale_bg_pmdec))
+        lstream_pmdec = stats.norm.logpdf(pmdec, loc=apply_spline(phi1, spline_x_points, pmdec_spline_points, k=k), scale=scale_stream_pmdec)
+        lbg_pmdec = stats.norm.logpdf(pmdec, loc=bpmdec, scale=scale_bg_pmdec) - lpmdec_cdf_dif
+    
+    if feh_fit:
+        ## Combine the components
+        lstream = lpstream + lstream_v + lstream_feh + lstream_pmra + lstream_pmdec
+        lbg = np.log(1-(np.e**lpstream)) + lbg_v + lbg_feh + lbg_pmra + lbg_pmdec
+
+    else:
+        lstream = lpstream + lstream_v + lstream_pmra + lstream_pmdec
+        lbg = np.log(1-(np.e**lpstream)) + lbg_v + lbg_pmra + lbg_pmdec
+        
+    ltot = np.logaddexp(lstream, lbg)
+
+    return np.sum(ltot)

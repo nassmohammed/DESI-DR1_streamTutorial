@@ -25,6 +25,7 @@ import feh_correct
 import warnings
 from astropy.utils.exceptions import AstropyDeprecationWarning
 import copy
+import multiprocessing
 # Suppress specific Astropy deprecation warnings
 warnings.filterwarnings("ignore", category=AstropyDeprecationWarning, module='gala.dynamics.core')
 
@@ -435,6 +436,22 @@ class stream:
         trimmed_stream.data.sfCrossMatch()  # Creates confirmed_sf_and_desi
         trimmed_stream.data.sfCrossMatch(False)  # Creates confirmed_sf_not_desi
         
+        # Step 5: Automatically compute VGSR for confirmed_sf_not_desi if it exists and has VHel data
+        if hasattr(trimmed_stream.data, 'confirmed_sf_not_desi') and len(trimmed_stream.data.confirmed_sf_not_desi) > 0:
+            if 'VHel' in trimmed_stream.data.confirmed_sf_not_desi.columns:
+                # Copy VHel and set 0 values to np.nan
+                vhel = np.array(trimmed_stream.data.confirmed_sf_not_desi['VHel'], dtype=float)
+                vhel[vhel == 0] = np.nan
+                
+                # Only compute VGSR if we have valid VHel values
+                if not np.all(np.isnan(vhel)):
+                    # Compute VGSR using the stream_functions
+                    trimmed_stream.data.confirmed_sf_not_desi['VGSR'] = stream_funcs.vhel_to_vgsr(
+                        np.array(trimmed_stream.data.confirmed_sf_not_desi['RAdeg']) * u.deg,
+                        np.array(trimmed_stream.data.confirmed_sf_not_desi['DEdeg']) * u.deg,
+                        vhel * u.km/u.s
+                    ).value
+        
         return trimmed_stream
 
     def isochrone(self, metallicity, age, dotter_directory='./data/dotter/'):
@@ -499,16 +516,26 @@ class StreamPlotter:
     """
     For really clean and easy plotting
     """
-    def __init__(self, stream_object, save_dir='plots/'):
+    def __init__(self, stream_or_mcmeta_object, save_dir='plots/'):
         """
-        Initializes the plotter with a stream object.
+        Initializes the plotter with a stream object or MCMeta object.
         
         Args:
-            stream_object (stream): An instance of your stream class.
+            stream_or_mcmeta_object: Either a stream instance or MCMeta instance
             save_dir (str): Directory to save plots.
         """
-        self.stream = stream_object
-        self.data = stream_object.data
+        # Check if it's an MCMeta object or stream object
+        if hasattr(stream_or_mcmeta_object, 'initial_params'):
+            # It's an MCMeta object
+            self.mcmeta = stream_or_mcmeta_object
+            self.stream = stream_or_mcmeta_object.stream
+            self.data = stream_or_mcmeta_object.stream.data
+        else:
+            # It's a stream object
+            self.stream = stream_or_mcmeta_object
+            self.data = stream_or_mcmeta_object.data
+            self.mcmeta = None
+            
         self.save_dir = save_dir
         # Create directory if it doesn't exist
         if not os.path.exists(self.save_dir):
@@ -955,15 +982,807 @@ class StreamPlotter:
         ax.set_ylim(-1.5, 8)
         ax.invert_yaxis()
         stream_funcs.plot_form(ax)
+
+    def sixD_plot(self, showStream=True, show_sf_only=False, background=True, save=False, stream_frame=True, galstream=False, show_cut=False, 
+                  show_initial_splines=False, show_optimized_splines=False, show_mcmc_splines=False, show_sf_errors=True, 
+                  show_membership_prob=False, stream_prob=None, min_prob=0.5):
+        """
+        Plots the stream phi1 vs phi2, vgsr, pmra, pmdec, and feh
+        
+        Parameters:
+        -----------
+        show_cut : bool, optional
+            Whether to show cut stars (red X markers). Default is True.
+        show_initial_splines : bool, optional
+            Whether to show initial guess splines in black. Default is False.
+        show_optimized_splines : bool, optional
+            Whether to show optimized splines in red. Default is False.
+        show_mcmc_splines : bool, optional
+            Whether to show MCMC results splines in blue. Default is False.
+        show_sf_errors : bool, optional
+            Whether to show error bars on StreamFinder stars. Default is True.
+        show_membership_prob : bool, optional
+            Whether to plot high membership probability stars with special styling. Default is False.
+        stream_prob : array-like, optional
+            Array of membership probabilities for DESI stars. Required if show_membership_prob=True.
+        min_prob : float, optional
+            Minimum membership probability threshold for highlighting stars. Default is 0.5.
+        """
+        if stream_frame:
+            col_x = 'phi1'
+            col_x_ = 'phi1'
+            label_x = r'$\phi_1$'
+        else:
+            col_x = 'TARGET_RA'
+            col_x_ = 'RAdeg'
+            label_x = 'RA (deg)'
+        if show_membership_prob:
+            fig, ax = plt.subplots(5, 1, figsize=(15, 15))
+        else:
+            fig, ax = plt.subplots(5, 1, figsize=(10, 15))
+        
+        # Plot 1: phi2 vs phi1 (or DEC vs RA)
+        if stream_frame:
+            col_y0 = 'phi2'
+            col_y0_ = 'phi2'
+            label_y0 = r'$\phi_2$'
+        else:
+            col_y0 = 'TARGET_DEC'
+            col_y0_ = 'DEdeg'
+            label_y0 = 'DEC (deg)'
+            
+        if showStream:
+            if show_sf_errors:
+                # Plot with error bars - create compatible parameters for errorbar
+                # Only use parameters that work with both errorbar and scatter
+                errorbar_params = {
+                    'color': self.plot_params['sf_in_desi'].get('color', 'green'),
+                    'label': self.plot_params['sf_in_desi'].get('label', 'SF $\\in$ DESI'),
+                    'zorder': self.plot_params['sf_in_desi'].get('zorder', 5),
+                    'alpha': self.plot_params['sf_in_desi'].get('alpha', 1.0),
+                    'markersize': 6,  # Use markersize instead of s
+                    'markeredgecolor': self.plot_params['sf_in_desi'].get('edgecolor', 'k'),
+                    'ecolor': self.plot_params['sf_in_desi'].get('edgecolor', 'k'),
+                    'capsize': 2,
+                }
                 
+                ax[0].errorbar(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi[col_y0],
+                    xerr=None, yerr=None,
+                    fmt='d', **errorbar_params  # Use diamond marker like the original
+                )
+                # VGSR with error bars
+                ax[1].errorbar(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi['VGSR'],
+                    xerr=None, yerr=self.data.confirmed_sf_and_desi['VRAD_ERR'],
+                    fmt='d', **errorbar_params
+                )
+                # PMRA with error bars
+                ax[2].errorbar(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi['PMRA'],
+                    xerr=None, yerr=self.data.confirmed_sf_and_desi['PMRA_ERROR'],
+                    fmt='d', **errorbar_params
+                )
+                # PMDEC with error bars
+                ax[3].errorbar(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi['PMDEC'],
+                    xerr=None, yerr=self.data.confirmed_sf_and_desi['PMDEC_ERROR'],
+                    fmt='d', **errorbar_params
+                )
+                # FEH with error bars
+                ax[4].errorbar(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi['FEH'],
+                    xerr=None, yerr=self.data.confirmed_sf_and_desi['FEH_ERR'],
+                    fmt='d', **errorbar_params
+                )
+            else:
+                # Plot without error bars (original behavior)
+                ax[0].scatter(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi[col_y0],
+                    **self.plot_params['sf_in_desi']
+                )
+                ax[1].scatter(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi['VGSR'],
+                    **self.plot_params['sf_in_desi']
+                )
+                ax[2].scatter(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi['PMRA'],
+                    **self.plot_params['sf_in_desi']
+                )
+                ax[3].scatter(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi['PMDEC'],
+                    **self.plot_params['sf_in_desi']
+                )
+                ax[4].scatter(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi['FEH'],
+                    **self.plot_params['sf_in_desi']
+                )
+            
+            if hasattr(self.data, 'cut_confirmed_sf_and_desi') and show_cut:
+                ax[0].scatter(
+                    self.data.cut_confirmed_sf_and_desi[col_x],
+                    self.data.cut_confirmed_sf_and_desi[col_y0],
+                    **self.plot_params['sf_in_desi_notsel']
+                )
+                ax[1].scatter(
+                    self.data.cut_confirmed_sf_and_desi[col_x],
+                    self.data.cut_confirmed_sf_and_desi['VGSR'],
+                    **self.plot_params['sf_in_desi_notsel']
+                )
+                ax[2].scatter(
+                    self.data.cut_confirmed_sf_and_desi[col_x],
+                    self.data.cut_confirmed_sf_and_desi['PMRA'],
+                    **self.plot_params['sf_in_desi_notsel']
+                )
+                ax[3].scatter(
+                    self.data.cut_confirmed_sf_and_desi[col_x],
+                    self.data.cut_confirmed_sf_and_desi['PMDEC'],
+                    **self.plot_params['sf_in_desi_notsel']
+                )
+                ax[4].scatter(
+                    self.data.cut_confirmed_sf_and_desi[col_x],
+                    self.data.cut_confirmed_sf_and_desi['FEH'],
+                    **self.plot_params['sf_in_desi_notsel']
+                )
+                
+            if stream_frame and galstream and hasattr(self.data, 'SoI_galstream') and self.data.SoI_galstream is not None:
+                ax[0].plot(
+                    self.data.SoI_galstream.gal_phi1,
+                    self.data.SoI_galstream.gal_phi2,
+                    **self.plot_params['galstream_track']
+                )
+            elif not stream_frame and galstream and hasattr(self.data, 'SoI_galstream') and self.data.SoI_galstream is not None:
+                ax[0].plot(
+                    self.data.SoI_galstream.track.ra,
+                    self.data.SoI_galstream.track.dec,
+                    **self.plot_params['galstream_track']
+                )
+                
+        if show_sf_only:
+            ax[0].scatter(
+                self.data.confirmed_sf_not_desi[col_x_],
+                self.data.confirmed_sf_not_desi[col_y0_],
+                **self.plot_params['sf_not_desi']
+            )
+            ax[1].scatter(
+                self.data.confirmed_sf_not_desi[col_x_],
+                self.data.confirmed_sf_not_desi['VGSR'],
+                **self.plot_params['sf_not_desi']
+            )
+            ax[2].scatter(
+                self.data.confirmed_sf_not_desi[col_x_],
+                self.data.confirmed_sf_not_desi['pmRA'],
+                **self.plot_params['sf_not_desi']
+            )
+            ax[3].scatter(
+                self.data.confirmed_sf_not_desi[col_x_],
+                self.data.confirmed_sf_not_desi['pmDE'],
+                **self.plot_params['sf_not_desi']
+            )
+            # Note: FEH not available in sf_not_desi, skip this subplot
+            
+        if background:
+            ax[0].scatter(
+                self.data.desi_data[col_x],
+                self.data.desi_data[col_y0],
+                **self.plot_params['background']
+            )
+            ax[1].scatter(
+                self.data.desi_data[col_x],
+                self.data.desi_data['VGSR'],
+                **self.plot_params['background']
+            )
+            ax[2].scatter(
+                self.data.desi_data[col_x],
+                self.data.desi_data['PMRA'],
+                **self.plot_params['background']
+            )
+            ax[3].scatter(
+                self.data.desi_data[col_x],
+                self.data.desi_data['PMDEC'],
+                **self.plot_params['background']
+            )
+            ax[4].scatter(
+                self.data.desi_data[col_x],
+                self.data.desi_data['FEH'],
+                **self.plot_params['background']
+            )
+        
+        # Plot membership probability stars if requested
+        if show_membership_prob and stream_prob is not None:
+            import matplotlib.cm as cm
+            import matplotlib.colors as colors
+            
+            # Validate stream_prob length matches DESI data
+            if len(stream_prob) != len(self.data.desi_data):
+                raise ValueError(f"stream_prob length ({len(stream_prob)}) must match DESI data length ({len(self.data.desi_data)})")
+            
+            # Get high probability stars
+            high_prob_mask = stream_prob >= min_prob
+            high_prob_indices = np.where(high_prob_mask)[0]
+            
+            if len(high_prob_indices) > 0:
+                # Create colormap for membership probabilities (viridis from min_prob to 1)
+                norm = colors.Normalize(vmin=min_prob, vmax=1.0)
+                cmap = cm.viridis
+                
+                # Plot high probability DESI stars as circles with viridis colormap
+                scatter_params = {
+                    'marker': 'o',
+                    's': 25,
+                    'c': stream_prob[high_prob_indices],
+                    'cmap': 'viridis',
+                    'norm': norm,
+                    'edgecolor': 'black',
+                    'linewidth': 0.5,
+                    'alpha': 0.8,
+                    'zorder': 6,
+                    'label': f'High Prob Stars (≥{min_prob:.1f})'
+                }
+                
+                # Plot on each subplot
+                ax[0].scatter(
+                    self.data.desi_data[col_x].iloc[high_prob_indices],
+                    self.data.desi_data[col_y0].iloc[high_prob_indices],
+                    **scatter_params
+                )
+                ax[1].scatter(
+                    self.data.desi_data[col_x].iloc[high_prob_indices],
+                    self.data.desi_data['VGSR'].iloc[high_prob_indices],
+                    **{k: v for k, v in scatter_params.items() if k != 'label'}
+                )
+                ax[2].scatter(
+                    self.data.desi_data[col_x].iloc[high_prob_indices],
+                    self.data.desi_data['PMRA'].iloc[high_prob_indices],
+                    **{k: v for k, v in scatter_params.items() if k != 'label'}
+                )
+                ax[3].scatter(
+                    self.data.desi_data[col_x].iloc[high_prob_indices],
+                    self.data.desi_data['PMDEC'].iloc[high_prob_indices],
+                    **{k: v for k, v in scatter_params.items() if k != 'label'}
+                )
+                ax[4].scatter(
+                    self.data.desi_data[col_x].iloc[high_prob_indices],
+                    self.data.desi_data['FEH'].iloc[high_prob_indices],
+                    **{k: v for k, v in scatter_params.items() if k != 'label'}
+                )
+                
+                # Add colorbar to the far right of all plots
+                # Add colorbar to the overall figure instead of individual subplot
+                # If ax is an array of Axes (like from plt.subplots)
+                sm = cm.ScalarMappable(norm=norm, cmap=cmap)
+                sm.set_array([])
+
+                # Ensure ax is a flat list of axes
+                if isinstance(ax, np.ndarray):
+                    ax = ax.ravel()
+
+                # Position colorbar next to all subplots
+                cbar = fig.colorbar(sm, ax=ax, pad=0.02, aspect=50, shrink=1.0, location='right')
+                cbar.set_label('Membership Probability', rotation=270, labelpad=15)
+            
+            # Modify StreamFinder star styling when membership prob is shown
+            if showStream:
+                # Calculate membership probabilities for StreamFinder stars if possible
+                sf_in_desi_indices = self.data.confirmed_sf_and_desi.index
+                desi_indices = self.data.desi_data.index
+                
+                # Find which DESI indices correspond to SF stars
+                sf_desi_mask = desi_indices.isin(sf_in_desi_indices)
+                sf_prob_values = stream_prob[sf_desi_mask]
+                
+                # Determine colors for SF stars based on membership probability
+                sf_high_prob_mask = sf_prob_values >= min_prob
+                
+                # Override existing StreamFinder star plots with new styling
+                sf_diamond_params_high = {
+                    'marker': 'D',
+                    's': 40,
+                    'c': sf_prob_values[sf_high_prob_mask],
+                    'cmap': 'viridis',
+                    'norm': norm,
+                    'edgecolor': 'black',
+                    'linewidth': 1,
+                    'alpha': 1.0,
+                    'zorder': 7,
+                }
+                
+                sf_diamond_params_low = {
+                    'marker': 'D',
+                    's': 40,
+                    'color': 'black',
+                    'edgecolor': 'black',
+                    'linewidth': 1,
+                    'alpha': 1.0,
+                    'zorder': 7,
+                }
+                
+                # Get high and low probability SF star indices
+                sf_indices_high = sf_in_desi_indices[sf_high_prob_mask]
+                sf_indices_low = sf_in_desi_indices[~sf_high_prob_mask]
+                
+                # Plot high probability SF stars with colormap
+                if len(sf_indices_high) > 0:
+                    sf_data_high = self.data.confirmed_sf_and_desi.loc[sf_indices_high]
+                    
+                    ax[0].scatter(
+                        sf_data_high[col_x],
+                        sf_data_high[col_y0],
+                        **sf_diamond_params_high
+                    )
+                    ax[1].scatter(
+                        sf_data_high[col_x],
+                        sf_data_high['VGSR'],
+                        **{k: v for k, v in sf_diamond_params_high.items() if k != 'label'}
+                    )
+                    ax[2].scatter(
+                        sf_data_high[col_x],
+                        sf_data_high['PMRA'],
+                        **{k: v for k, v in sf_diamond_params_high.items() if k != 'label'}
+                    )
+                    ax[3].scatter(
+                        sf_data_high[col_x],
+                        sf_data_high['PMDEC'],
+                        **{k: v for k, v in sf_diamond_params_high.items() if k != 'label'}
+                    )
+                    ax[4].scatter(
+                        sf_data_high[col_x],
+                        sf_data_high['FEH'],
+                        **{k: v for k, v in sf_diamond_params_high.items() if k != 'label'}
+                    )
+                
+                # Plot low probability SF stars as black diamonds
+                if len(sf_indices_low) > 0:
+                    sf_data_low = self.data.confirmed_sf_and_desi.loc[sf_indices_low]
+                    
+                    ax[0].scatter(
+                        sf_data_low[col_x],
+                        sf_data_low[col_y0],
+                        **sf_diamond_params_low,
+                        label=f'SF Stars (<{min_prob:.1f})'
+                    )
+                    ax[1].scatter(
+                        sf_data_low[col_x],
+                        sf_data_low['VGSR'],
+                        **sf_diamond_params_low
+                    )
+                    ax[2].scatter(
+                        sf_data_low[col_x],
+                        sf_data_low['PMRA'],
+                        **sf_diamond_params_low
+                    )
+                    ax[3].scatter(
+                        sf_data_low[col_x],
+                        sf_data_low['PMDEC'],
+                        **sf_diamond_params_low
+                    )
+                    ax[4].scatter(
+                        sf_data_low[col_x],
+                        sf_data_low['FEH'],
+                        **sf_diamond_params_low
+                    )
+
+        # Set y-axis limits based on stream data if available
+        if showStream and hasattr(self.data, 'confirmed_sf_and_desi') and len(self.data.confirmed_sf_and_desi) > 0:
+            # VGSR limits
+            vgsr_data = [self.data.confirmed_sf_and_desi['VGSR']]
+            if hasattr(self.data, 'cut_confirmed_sf_and_desi') and len(self.data.cut_confirmed_sf_and_desi) > 0 and show_cut:
+                vgsr_data.append(self.data.cut_confirmed_sf_and_desi['VGSR'])
+            vgsr_combined = np.concatenate(vgsr_data)
+            ax[1].set_ylim(np.nanmin(vgsr_combined) - 50, np.nanmax(vgsr_combined) + 50)
+            
+            # Proper motion limits  
+            pmra_data = [self.data.confirmed_sf_and_desi['PMRA']]
+            pmdec_data = [self.data.confirmed_sf_and_desi['PMDEC']]
+            if hasattr(self.data, 'cut_confirmed_sf_and_desi') and len(self.data.cut_confirmed_sf_and_desi) > 0 and show_cut:
+                pmra_data.append(self.data.cut_confirmed_sf_and_desi['PMRA'])
+                pmdec_data.append(self.data.cut_confirmed_sf_and_desi['PMDEC'])
+            pmra_combined = np.concatenate(pmra_data)
+            pmdec_combined = np.concatenate(pmdec_data)
+            ax[2].set_ylim(np.nanmin(pmra_combined) - 5, np.nanmax(pmra_combined) + 5)
+            ax[3].set_ylim(np.nanmin(pmdec_combined) - 5, np.nanmax(pmdec_combined) + 5)
+
+        # Set metallicity limits
+        ax[4].set_ylim(-4, -0.5)
+        
+        # Plot splines if requested and available
+        if (show_initial_splines or show_optimized_splines) and stream_frame and self.mcmeta is not None:
+            # Create phi1 range for spline plotting
+            phi1_min = ax[1].get_xlim()[0]
+            phi1_max = ax[1].get_xlim()[1]
+            phi1_spline_plot = np.linspace(phi1_min, phi1_max, 100)
+            
+            # Plot initial guess splines in black
+            if show_initial_splines:
+                if hasattr(self.mcmeta, 'phi1_spline_points'):
+                    try:
+                        # VGSR spline
+                        vgsr_initial = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            self.mcmeta.initial_params['vgsr_spline_points'], k=2
+                        )
+                        ax[1].plot(phi1_spline_plot, vgsr_initial, 'k-', linewidth=2, 
+                                  label='Initial Spline', alpha=0.8)
+                        
+                        # PMRA spline
+                        pmra_initial = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            self.mcmeta.initial_params['pmra_spline_points'], k=2
+                        )
+                        ax[2].plot(phi1_spline_plot, pmra_initial, 'k-', linewidth=2, 
+                                  label='Initial Spline', alpha=0.8)
+                        
+                        # PMDEC spline
+                        pmdec_initial = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            self.mcmeta.initial_params['pmdec_spline_points'], k=2
+                        )
+                        ax[3].plot(phi1_spline_plot, pmdec_initial, 'k-', linewidth=2, 
+                                  label='Initial Spline', alpha=0.8)
+                        
+                        # FEH constant line
+                        feh_initial = np.full_like(phi1_spline_plot, self.mcmeta.initial_params['feh1'])
+                        ax[4].plot(phi1_spline_plot, feh_initial, 'k-', linewidth=2, 
+                                  label='Initial [Fe/H]', alpha=0.8)
+                    except Exception as e:
+                        print(f"Warning: Could not plot initial splines: {e}")
+            
+            # Plot optimized splines in red
+            if show_optimized_splines and hasattr(self.mcmeta, 'optimized_params'):
+                if hasattr(self.mcmeta, 'phi1_spline_points'):
+                    try:
+                        # VGSR spline
+                        vgsr_optimized = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            self.mcmeta.optimized_params['vgsr_spline_points'], k=2
+                        )
+                        ax[1].plot(phi1_spline_plot, vgsr_optimized, 'r-', linewidth=2, 
+                                  label='Optimized Spline', alpha=0.8)
+                        
+                        # PMRA spline
+                        pmra_optimized = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            self.mcmeta.optimized_params['pmra_spline_points'], k=2
+                        )
+                        ax[2].plot(phi1_spline_plot, pmra_optimized, 'r-', linewidth=2, 
+                                  label='Optimized Spline', alpha=0.8)
+                        
+                        # PMDEC spline
+                        pmdec_optimized = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            self.mcmeta.optimized_params['pmdec_spline_points'], k=2
+                        )
+                        ax[3].plot(phi1_spline_plot, pmdec_optimized, 'r-', linewidth=2, 
+                                  label='Optimized Spline', alpha=0.8)
+                        
+                        # FEH constant line
+                        feh_optimized = np.full_like(phi1_spline_plot, self.mcmeta.optimized_params['feh1'])
+                        ax[4].plot(phi1_spline_plot, feh_optimized, 'r-', linewidth=2, 
+                                  label='Optimized [Fe/H]', alpha=0.8)
+                    except Exception as e:
+                        print(f"Warning: Could not plot optimized splines: {e}")
+            
+            # Plot MCMC splines in blue (requires external meds dictionary with MCMC results)
+            if show_mcmc_splines and hasattr(self.mcmeta, 'phi1_spline_points'):
+                try:
+                    # Try to access meds from the global namespace or pass it as parameter
+                    # This is a bit of a hack - in a proper implementation you'd pass meds as a parameter
+                    import inspect
+                    frame = inspect.currentframe()
+                    try:
+                        # Look for meds in the calling frame's globals
+                        caller_frame = frame.f_back
+                        while caller_frame:
+                            if 'meds' in caller_frame.f_globals:
+                                meds = caller_frame.f_globals['meds']
+                                break
+                            elif 'meds' in caller_frame.f_locals:
+                                meds = caller_frame.f_locals['meds']
+                                break
+                            caller_frame = caller_frame.f_back
+                        else:
+                            raise NameError("meds not found in calling context")
+                            
+                        # Extract spline points from meds dictionary
+                        no_of_spline_points = len(self.mcmeta.phi1_spline_points)
+                        
+                        # Build the spline arrays from the flattened meds
+                        vgsr_mcmc_points = []
+                        pmra_mcmc_points = []  
+                        pmdec_mcmc_points = []
+                        
+                        # Extract vgsr spline points
+                        for i in range(1, no_of_spline_points + 1):
+                            vgsr_mcmc_points.append(meds[f'vgsr{i}'])
+                            
+                        # Extract pmra spline points  
+                        for i in range(1, no_of_spline_points + 1):
+                            pmra_mcmc_points.append(meds[f'pmra{i}'])
+                            
+                        # Extract pmdec spline points
+                        for i in range(1, no_of_spline_points + 1):
+                            pmdec_mcmc_points.append(meds[f'pmdec{i}'])
+                        
+                        # Convert to arrays
+                        vgsr_mcmc_points = np.array(vgsr_mcmc_points)
+                        pmra_mcmc_points = np.array(pmra_mcmc_points)  
+                        pmdec_mcmc_points = np.array(pmdec_mcmc_points)
+                        
+                        # VGSR spline
+                        vgsr_mcmc = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            vgsr_mcmc_points, k=2
+                        )
+                        ax[1].plot(phi1_spline_plot, vgsr_mcmc, 'b-', linewidth=2, 
+                                  label='MCMC Spline', alpha=0.8)
+                        
+                        # PMRA spline
+                        pmra_mcmc = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            pmra_mcmc_points, k=2
+                        )
+                        ax[2].plot(phi1_spline_plot, pmra_mcmc, 'b-', linewidth=2, 
+                                  label='MCMC Spline', alpha=0.8)
+                        
+                        # PMDEC spline
+                        pmdec_mcmc = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            pmdec_mcmc_points, k=2
+                        )
+                        ax[3].plot(phi1_spline_plot, pmdec_mcmc, 'b-', linewidth=2, 
+                                  label='MCMC Spline', alpha=0.8)
+                        
+                        # FEH constant line
+                        feh_mcmc = np.full_like(phi1_spline_plot, meds['feh1'])
+                        ax[4].plot(phi1_spline_plot, feh_mcmc, 'b-', linewidth=2, 
+                                  label='MCMC [Fe/H]', alpha=0.8)
+                                  
+                    finally:
+                        del frame
+                        
+                except Exception as e:
+                    print(f"Warning: Could not plot MCMC splines: {e}")
+                    print("Make sure 'meds' dictionary with MCMC results is available in the calling scope")
+        
+        # Labels and formatting
+        if show_initial_splines or show_optimized_splines or show_mcmc_splines:
+            # Add legends to kinematic plots if splines are shown
+            for i in [1]:  # Show legends on all kinematic plots
+                if ax[i].get_lines():  # Only add legend if there are lines to show
+                    ax[i].legend(loc='best', fontsize='small')
+        
+        ax[0].legend(loc='upper left', ncol=4)
+        ax[0].set_ylabel(label_y0)
+        ax[1].set_ylabel(r'V$_{GSR}$ (km/s)')
+        ax[2].set_ylabel(r'$\mu_{\alpha}$ [mas/yr]')
+        ax[3].set_ylabel(r'$\mu_{\delta}$ [mas/yr]')
+        ax[4].set_ylabel(r'[Fe/H]')
+        ax[-1].set_xlabel(label_x)
+        
+        for a in ax:
+            stream_funcs.plot_form(a)
+            
+        if save:
+            plt.tight_layout()
+            plt.savefig(f"{self.save_dir}sixD_plot_{self.stream.streamName}.png", dpi=300, bbox_inches='tight')
+            
+        return fig, ax
+    
+    def gaussian_mixture_plot(self, showStream=True, show_sf_only=False, background=True, save=False):
+        """
+        Plots Gaussian mixture model distributions for stream vs background in 4 dimensions:
+        VGSR, FEH, PMRA, PMDEC
+        
+        Uses truncated Gaussians based on the selection cuts applied to the data.
+        Requires MCMeta object to be initialized with initial parameters.
+        """
+        if self.mcmeta is None:
+            raise ValueError("MCMeta object required for gaussian_mixture_plot. Initialize StreamPlotter with MCMeta object.")
+            
+        colors = list(plt.rcParams["axes.prop_cycle"].by_key()["color"])
+        from scipy.stats import truncnorm
+        
+        fig, axes = plt.subplots(2, 2, figsize=(9, 9))
+        
+        # Get data arrays
+        desi_data = self.data.desi_data
+        sf_data = self.data.confirmed_sf_and_desi if hasattr(self.data, 'confirmed_sf_and_desi') else pd.DataFrame()
+        
+        # Define plotting parameters
+        alpha_stream = 0.7
+        alpha_bg = 0.5
+        bins = 50
+        
+        # Estimate mixture weights
+        n_stream = len(sf_data) if len(sf_data) > 0 else 1
+        n_total = len(desi_data)
+        stream_weight = n_stream / n_total
+        bg_weight = 1 - stream_weight
+        
+        # VGSR plot (top left)
+        ax = axes[0, 0]
+        if background:
+            ax.hist(desi_data['VGSR'], density=True, color='lightgrey', bins=bins, alpha=0.7, label='DESI Data')
+        
+        if showStream and len(sf_data) > 0:
+            ax.hist(sf_data['VGSR'], density=True, color='lightblue', bins=bins, alpha=0.8, label='SF Stars')
+            
+        # Plot truncated Gaussian components
+        vgsr_range = np.linspace(self.mcmeta.truncation_params['vgsr_min'] - 50, 
+                                self.mcmeta.truncation_params['vgsr_max'] + 50, 200)
+        
+        # Stream component (using mean of spline points as approximation)
+        stream_vgsr_mean = np.mean(self.mcmeta.initial_params['vgsr_spline_points'])
+        stream_vgsr_std = 10**self.mcmeta.initial_params['lsigvgsr']
+        
+        # Background component
+        bg_vgsr_mean = self.mcmeta.initial_params['bv']
+        bg_vgsr_std = 10**self.mcmeta.initial_params['lsigbv']
+        
+        # Stream truncated normal
+        stream_a = (self.mcmeta.truncation_params['vgsr_min'] - stream_vgsr_mean) / stream_vgsr_std
+        stream_b = (self.mcmeta.truncation_params['vgsr_max'] - stream_vgsr_mean) / stream_vgsr_std
+        stream_vgsr_pdf = truncnorm.pdf(vgsr_range, stream_a, stream_b, loc=stream_vgsr_mean, scale=stream_vgsr_std)
+        
+        # Background truncated normal
+        bg_a = (self.mcmeta.truncation_params['vgsr_min'] - bg_vgsr_mean) / bg_vgsr_std
+        bg_b = (self.mcmeta.truncation_params['vgsr_max'] - bg_vgsr_mean) / bg_vgsr_std
+        bg_vgsr_pdf = truncnorm.pdf(vgsr_range, bg_a, bg_b, loc=bg_vgsr_mean, scale=bg_vgsr_std)
+        
+        ax.plot(vgsr_range, stream_weight * stream_vgsr_pdf, ':', color=colors[0], label='Stream Component', lw=3)
+        ax.plot(vgsr_range, bg_weight * bg_vgsr_pdf, ':', color=colors[1], label='Background Component', lw=3)
+        ax.plot(vgsr_range, stream_weight * stream_vgsr_pdf + bg_weight * bg_vgsr_pdf, 'k-', label='Total Model', lw=3)
+        
+        ax.set_xlabel(r'V$_{GSR}$ (km/s)', fontsize=12)
+        ax.set_xlim(self.mcmeta.truncation_params['vgsr_min'] - 50, self.mcmeta.truncation_params['vgsr_max'] + 50)
+        ax.legend(fontsize='large')
+        ax.tick_params(axis='both', labelsize=14)
+        stream_funcs.plot_form(ax)
+        
+        # FEH plot (top right)
+        ax = axes[0, 1]
+        if background:
+            ax.hist(desi_data['FEH'], density=True, color='lightgrey', bins=bins, alpha=0.7)
+            
+        if showStream and len(sf_data) > 0:
+            ax.hist(sf_data['FEH'], density=True, color='lightblue', bins=bins, alpha=0.8)
+            
+        # Plot truncated Gaussian components
+        feh_range = np.linspace(self.mcmeta.truncation_params['feh_min'] - 0.5, 
+                               self.mcmeta.truncation_params['feh_max'] + 0.5, 200)
+        
+        # Stream component
+        stream_feh_mean = self.mcmeta.initial_params['feh1']
+        stream_feh_std = 10**self.mcmeta.initial_params['lsigfeh']
+        
+        # Background component
+        bg_feh_mean = self.mcmeta.initial_params['bfeh']
+        bg_feh_std = 10**self.mcmeta.initial_params['lsigbfeh']
+        
+        # Stream truncated normal
+        stream_a = (self.mcmeta.truncation_params['feh_min'] - stream_feh_mean) / stream_feh_std
+        stream_b = (self.mcmeta.truncation_params['feh_max'] - stream_feh_mean) / stream_feh_std
+        stream_feh_pdf = truncnorm.pdf(feh_range, stream_a, stream_b, loc=stream_feh_mean, scale=stream_feh_std)
+        
+        # Background truncated normal
+        bg_a = (self.mcmeta.truncation_params['feh_min'] - bg_feh_mean) / bg_feh_std
+        bg_b = (self.mcmeta.truncation_params['feh_max'] - bg_feh_mean) / bg_feh_std
+        bg_feh_pdf = truncnorm.pdf(feh_range, bg_a, bg_b, loc=bg_feh_mean, scale=bg_feh_std)
+        
+        ax.plot(feh_range, stream_weight * stream_feh_pdf, ':', color=colors[0], lw=3)
+        ax.plot(feh_range, bg_weight * bg_feh_pdf, ':', color=colors[1], lw=3)
+        ax.plot(feh_range, stream_weight * stream_feh_pdf + bg_weight * bg_feh_pdf, 'k-', lw=3)
+        
+        ax.set_xlabel('[Fe/H]', fontsize=12)
+        ax.set_xlim(self.mcmeta.truncation_params['feh_min'] - 0.5, self.mcmeta.truncation_params['feh_max'] + 0.5)
+        ax.tick_params(axis='both', labelsize=14)
+        stream_funcs.plot_form(ax)
+        
+        # PMRA plot (bottom left)
+        ax = axes[1, 0]
+        if background:
+            ax.hist(desi_data['PMRA'], density=True, color='lightgrey', bins=bins, alpha=0.7)
+            
+        if showStream and len(sf_data) > 0:
+            ax.hist(sf_data['PMRA'], density=True, color='lightblue', bins=bins, alpha=0.8)
+            
+        # Plot truncated Gaussian components
+        pmra_range = np.linspace(self.mcmeta.truncation_params['pmra_min'] - 15, 
+                                self.mcmeta.truncation_params['pmra_max'] + 15, 200)
+        
+        # Stream component (using mean of spline points as approximation)
+        stream_pmra_mean = np.mean(self.mcmeta.initial_params['pmra_spline_points'])
+        stream_pmra_std = 10**self.mcmeta.initial_params['lsigpmra']
+        
+        # Background component
+        bg_pmra_mean = self.mcmeta.initial_params['bpmra']
+        bg_pmra_std = 10**self.mcmeta.initial_params['lsigbpmra']
+        
+        # Stream truncated normal
+        stream_a = (self.mcmeta.truncation_params['pmra_min'] - stream_pmra_mean) / stream_pmra_std
+        stream_b = (self.mcmeta.truncation_params['pmra_max'] - stream_pmra_mean) / stream_pmra_std
+        stream_pmra_pdf = truncnorm.pdf(pmra_range, stream_a, stream_b, loc=stream_pmra_mean, scale=stream_pmra_std)
+        
+        # Background truncated normal
+        bg_a = (self.mcmeta.truncation_params['pmra_min'] - bg_pmra_mean) / bg_pmra_std
+        bg_b = (self.mcmeta.truncation_params['pmra_max'] - bg_pmra_mean) / bg_pmra_std
+        bg_pmra_pdf = truncnorm.pdf(pmra_range, bg_a, bg_b, loc=bg_pmra_mean, scale=bg_pmra_std)
+        
+        ax.plot(pmra_range, stream_weight * stream_pmra_pdf, ':', color=colors[0], lw=3)
+        ax.plot(pmra_range, bg_weight * bg_pmra_pdf, ':', color=colors[1], lw=3)
+        ax.plot(pmra_range, stream_weight * stream_pmra_pdf + bg_weight * bg_pmra_pdf, 'k-', lw=3)
+        
+ 
+        ax.set_xlabel(r'$\mu_{RA}$ (mas/yr)', fontsize=12)
+        ax.set_xlim(self.mcmeta.truncation_params['pmra_min'] - 15, self.mcmeta.truncation_params['pmra_max'] + 15)
+        ax.tick_params(axis='both', labelsize=14)
+        stream_funcs.plot_form(ax)
+        
+        # PMDEC plot (bottom right)
+        ax = axes[1, 1]
+        if background:
+            ax.hist(desi_data['PMDEC'], density=True, color='lightgrey', bins=bins, alpha=0.7)
+            
+        if showStream and len(sf_data) > 0:
+            ax.hist(sf_data['PMDEC'], density=True, color='lightblue', bins=bins, alpha=0.8)
+            
+        # Plot truncated Gaussian components
+        pmdec_range = np.linspace(self.mcmeta.truncation_params['pmdec_min'] - 15, 
+                                 self.mcmeta.truncation_params['pmdec_max'] + 15, 200)
+        
+        # Stream component (using mean of spline points as approximation)
+        stream_pmdec_mean = np.mean(self.mcmeta.initial_params['pmdec_spline_points'])
+        stream_pmdec_std = 10**self.mcmeta.initial_params['lsigpmdec']
+        
+        # Background component
+        bg_pmdec_mean = self.mcmeta.initial_params['bpmdec']
+        bg_pmdec_std = 10**self.mcmeta.initial_params['lsigbpmdec']
+        
+        # Stream truncated normal
+        stream_a = (self.mcmeta.truncation_params['pmdec_min'] - stream_pmdec_mean) / stream_pmdec_std
+        stream_b = (self.mcmeta.truncation_params['pmdec_max'] - stream_pmdec_mean) / stream_pmdec_std
+        stream_pmdec_pdf = truncnorm.pdf(pmdec_range, stream_a, stream_b, loc=stream_pmdec_mean, scale=stream_pmdec_std)
+        
+        # Background truncated normal
+        bg_a = (self.mcmeta.truncation_params['pmdec_min'] - bg_pmdec_mean) / bg_pmdec_std
+        bg_b = (self.mcmeta.truncation_params['pmdec_max'] - bg_pmdec_mean) / bg_pmdec_std
+        bg_pmdec_pdf = truncnorm.pdf(pmdec_range, bg_a, bg_b, loc=bg_pmdec_mean, scale=bg_pmdec_std)
+        
+        ax.plot(pmdec_range, stream_weight * stream_pmdec_pdf, ':', color=colors[0], lw=3)
+        ax.plot(pmdec_range, bg_weight * bg_pmdec_pdf, ':', color=colors[1], lw=3)
+        ax.plot(pmdec_range, stream_weight * stream_pmdec_pdf + bg_weight * bg_pmdec_pdf, 'k-', lw=3)
+        
+        ax.set_xlabel(r'$\mu_{DEC}$ (mas/yr)', fontsize=12)
+        ax.set_xlim(self.mcmeta.truncation_params['pmdec_min'] - 15, self.mcmeta.truncation_params['pmdec_max'] + 15)
+        ax.tick_params(axis='both', labelsize=14)
+        stream_funcs.plot_form(ax)
+        
+        plt.tight_layout()
+        
+        if save:
+            plt.savefig(f"{self.save_dir}gaussian_mixture_{self.stream.streamName}.png", dpi=300, bbox_inches='tight')
+            
+        return fig, axes
+
+
 class MCMeta:
     """
     For creating and plotting a spline track of the stream.
     """
-    def __init__(self, no_of_spline_points, stream_object):
+    def __init__(self, no_of_spline_points, stream_object, sf_data, truncation_params=None):
         self.stream = stream_object
         self.no_of_spline_points = no_of_spline_points
-
+        self.sf_data = sf_data
         if self.no_of_spline_points == 1:
             self.spline_k = 1
         elif self.no_of_spline_points > 3:
@@ -971,6 +1790,319 @@ class MCMeta:
         else:
             self.spline_k = self.no_of_spline_points - 1
 
-        print('Making intitial guess based of galstream and STREAMFINDER...')
+        self.phi1_spline_points = np.linspace(self.stream.data.SoI_streamfinder['phi1'].min()-5, self.stream.data.SoI_streamfinder['phi1'].max()+5, self.no_of_spline_points)
+
+        # Store truncation parameters for plotting
+        if truncation_params is None:
+            # Default truncation values based on data range
+            data = self.stream.data.desi_data
+            self.truncation_params = {
+                'vgsr_min': data['VGSR'].min(),
+                'vgsr_max': data['VGSR'].max(),
+                'feh_min': data['FEH'].min(),
+                'feh_max': data['FEH'].max(),
+                'pmra_min': data['PMRA'].min(),
+                'pmra_max': data['PMRA'].max(),
+                'pmdec_min': data['PMDEC'].min(),
+                'pmdec_max': data['PMDEC'].max()
+            }
+        else:
+            self.truncation_params = truncation_params
+
+        self.param_labels = [
+            "vgsr_spline_points", "lsigvgsr",
+            "feh1", "lsigfeh",
+            "pmra_spline_points", "lsigpmra",
+            "pmdec_spline_points", "lsigpmdec",
+            "bv", "lsigbv", "bfeh", "lsigbfeh", "bpmra", "lsigbpmra", "bpmdec", "lsigbpmdec"
+        ]
+
+        # Initialize the initial_params dictionary
+        self.initial_params = {}
+
+        print('Making stream initial guess based on galstream and STREAMFINDER...')
+        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['VGSR'].values, 2)
+        self.vgsr_fit = np.poly1d(p)
+        self.initial_params['lsigvgsr'] = np.log10(self.sf_data['VGSR'].values.std())
+        self.initial_params['vgsr_spline_points'] = self.vgsr_fit(self.phi1_spline_points)
+        print(f"Stream VGSR dispersion from trimmed SF: {10**self.initial_params['lsigvgsr']:.2f} km/s")
+
+        self.initial_params['feh1'] = self.sf_data['FEH'].values.mean()
+        self.initial_params['lsigfeh'] = np.log10(self.sf_data['FEH'].values.std())
+        print(f'Stream mean metallicity from trimmed SF: {self.initial_params["feh1"]:.2f} +- {10**self.initial_params["lsigfeh"]:.3f} dex')
+
+        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMRA'].values, 2)
+        self.pmra_fit = np.poly1d(p)
+        self.initial_params['lsigpmra'] = np.log10(self.sf_data['PMRA'].values.std())
+        self.initial_params['pmra_spline_points'] = self.pmra_fit(self.phi1_spline_points)
+        print(f"Stream PMRA dispersion from trimmed SF: {10**self.initial_params['lsigpmra']:.2f} mas/yr")
+
+        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMDEC'].values, 2)
+        self.pmdec_fit = np.poly1d(p)
+        self.initial_params['lsigpmdec'] = np.log10(self.sf_data['PMDEC'].values.std())
+        self.initial_params['pmdec_spline_points'] = self.pmdec_fit(self.phi1_spline_points)
+        print(f"Stream PMDEC dispersion from trimmed SF: {10**self.initial_params['lsigpmdec']:.2f} mas/yr")
+
+        print('Making background initial guess...')
+        self.initial_params['bv'] = np.mean(np.array(self.stream.data.desi_data['VGSR']))
+        self.initial_params['lsigbv'] = np.log10(np.std(np.array(self.stream.data.desi_data['VGSR'])))
+        print(f"Background velocity: {self.initial_params['bv']:.2f} +- {10**self.initial_params['lsigbv']:.2f} km/s")
+
+        self.initial_params['bfeh'] = np.mean(np.array(self.stream.data.desi_data['FEH']))
+        self.initial_params['lsigbfeh'] = np.log10(np.std(np.array(self.stream.data.desi_data['FEH'])))
+        print(f"Background metallicity: {self.initial_params['bfeh']:.2f} +- {10**self.initial_params['lsigbfeh']:.3f} dex")
+
+        self.initial_params['bpmra'] = np.mean(np.array(self.stream.data.desi_data['PMRA']))
+        self.initial_params['lsigbpmra'] = np.log10(np.std(np.array(self.stream.data.desi_data['PMRA'])))
+        print(f"Background PMRA: {self.initial_params['bpmra']:.2f} +- {10**self.initial_params['lsigbpmra']:.2f} mas/yr")
+
+        self.initial_params['bpmdec'] = np.mean(np.array(self.stream.data.desi_data['PMDEC']))
+        self.initial_params['lsigbpmdec'] = np.log10(np.std(np.array(self.stream.data.desi_data['PMDEC'])))
+        print(f"Background PMDEC: {self.initial_params['bpmdec']:.2f} +- {10**self.initial_params['lsigbpmdec']:.2f} mas/yr")
+
+    def create_plotter(self, save_dir='plots/'):
+        """
+        Create a StreamPlotter object initialized with this MCMeta instance.
         
-    
+        Returns:
+            StreamPlotter: A plotter object that can access both stream and MCMeta functionality.
+        """
+        return StreamPlotter(self, save_dir=save_dir)
+
+    def plot_chains(self, sampler, param_labels, save=False, burnin=0, thin=1, figsize=(12, 8)):
+        """
+        Plot MCMC chains for all parameters to check convergence
+        
+        Parameters:
+        -----------
+        sampler : emcee.EnsembleSampler
+            The emcee sampler object from MCMC run
+        param_labels : list
+            List of parameter names for labeling
+        save : bool, optional
+            Whether to save the plot. Default is False.
+        burnin : int, optional
+            Number of burn-in samples to discard. Default is 0.
+        thin : int, optional
+            Thin the chain by this factor. Default is 1.
+        figsize : tuple, optional
+            Figure size. Default is (12, 8).
+            
+        Returns:
+        --------
+        fig, axes : matplotlib figure and axes
+            The plot figure and axes
+        """
+        # Get the chain
+        samples = sampler.get_chain(discard=burnin, thin=thin)
+        nwalkers, nsteps, ndim = samples.shape
+        
+        # Create subplots
+        ncols = 3
+        nrows = int(np.ceil(ndim / ncols))
+        fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
+        
+        # Handle different subplot configurations
+        if nrows == 1 and ncols == 1:
+            axes = [axes]
+        elif nrows == 1 or ncols == 1:
+            axes = axes.flatten()
+        else:
+            axes = axes.flatten()
+        
+        # Plot each parameter
+        for i in range(ndim):
+            ax = axes[i]
+            
+            # Plot all walker chains
+            for j in range(nwalkers):
+                ax.plot(samples[j, :, i], alpha=0.3, color='k', lw=0.5)
+            
+            # Set labels
+            param_name = param_labels[i] if i < len(param_labels) else f'param_{i}'
+            ax.set_title(param_name, fontsize=10)
+            ax.set_xlabel('Step')
+            ax.set_ylabel('Value')
+            stream_funcs.plot_form(ax)
+        
+        # Hide unused subplots
+        for i in range(ndim, len(axes)):
+            axes[i].set_visible(False)
+            
+        plt.tight_layout()
+        
+        if save:
+            save_dir = 'plots/'
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+            plt.savefig(f"{save_dir}mcmc_chains_{self.stream.streamName}.png", 
+                       dpi=300, bbox_inches='tight')
+        
+        return fig, axes
+
+    def plot_corner(self, sampler, param_labels, save=False, burnin=0, thin=1, truths=None, 
+                   show_titles=True, title_fmt=".3f", quantiles=[0.16, 0.5, 0.84]):
+        """
+        Create a corner plot of the MCMC posterior distributions
+        
+        Parameters:
+        -----------
+        sampler : emcee.EnsembleSampler
+            The emcee sampler object from MCMC run
+        param_labels : list
+            List of parameter names for labeling
+        save : bool, optional
+            Whether to save the plot. Default is False.
+        burnin : int, optional
+            Number of burn-in samples to discard. Default is 0.
+        thin : int, optional
+            Thin the chain by this factor. Default is 1.
+        truths : array_like, optional
+            True parameter values to overplot. Default is None.
+        show_titles : bool, optional
+            Whether to show parameter value titles. Default is True.
+        title_fmt : str, optional
+            Format string for parameter titles. Default is ".3f".
+        quantiles : list, optional
+            Quantiles to show in histograms. Default is [0.16, 0.5, 0.84].
+            
+        Returns:
+        --------
+        fig : matplotlib figure
+            The corner plot figure
+        """
+        # Get the flattened chain
+        samples = sampler.get_chain(discard=burnin, thin=thin, flat=True)
+        
+        # Create the corner plot
+        fig = corner.corner(
+            samples, 
+            labels=param_labels,
+            truths=truths,
+            show_titles=show_titles,
+            title_fmt=title_fmt,
+            quantiles=quantiles,
+            plot_datapoints=False,
+            fill_contours=True,
+            levels=(0.68, 0.95),
+            color='blue',
+            hist_kwargs={'density': True}
+        )
+        
+        if save:
+            save_dir = 'plots/'
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+            plt.savefig(f"{save_dir}corner_plot_{self.stream.streamName}.png", 
+                       dpi=300, bbox_inches='tight')
+        
+        return fig
+
+    def get_parameter_summary(self, sampler, param_labels, burnin=0, thin=1, percentiles=[16, 50, 84]):
+        """
+        Get summary statistics for MCMC parameters
+        
+        Parameters:
+        -----------
+        sampler : emcee.EnsembleSampler
+            The emcee sampler object from MCMC run
+        param_labels : list
+            List of parameter names
+        burnin : int, optional
+            Number of burn-in samples to discard. Default is 0.
+        thin : int, optional
+            Thin the chain by this factor. Default is 1.
+        percentiles : list, optional
+            Percentiles to compute. Default is [16, 50, 84] for median and 1-sigma.
+            
+        Returns:
+        --------
+        dict : parameter summary
+            Dictionary with parameter names as keys and [lower, median, upper] as values
+        """
+        # Get the flattened chain
+        samples = sampler.get_chain(discard=burnin, thin=thin, flat=True)
+        
+        summary = {}
+        for i, label in enumerate(param_labels):
+            if i < samples.shape[1]:
+                percentile_values = np.percentile(samples[:, i], percentiles)
+                summary[label] = {
+                    'lower': percentile_values[0],
+                    'median': percentile_values[1], 
+                    'upper': percentile_values[2],
+                    'mean': np.mean(samples[:, i]),
+                    'std': np.std(samples[:, i])
+                }
+            
+        return summary
+
+    def print_parameter_summary(self, sampler, param_labels, burnin=0, thin=1):
+        """
+        Print a formatted summary of MCMC parameter results
+        
+        Parameters:
+        -----------
+        sampler : emcee.EnsembleSampler
+            The emcee sampler object from MCMC run
+        param_labels : list
+            List of parameter names
+        burnin : int, optional
+            Number of burn-in samples to discard. Default is 0.
+        thin : int, optional
+            Thin the chain by this factor. Default is 1.
+        """
+        summary = self.get_parameter_summary(sampler, param_labels, burnin=burnin, thin=thin)
+        
+        print("\nMCMC Parameter Summary:")
+        print("=" * 60)
+        print(f"{'Parameter':<20} {'Median':<12} {'Lower':<12} {'Upper':<12}")
+        print("-" * 60)
+        
+        for param, stats in summary.items():
+            median = stats['median']
+            lower_err = stats['median'] - stats['lower']
+            upper_err = stats['upper'] - stats['median']
+            
+            print(f"{param:<20} {median:>11.4f} -{lower_err:>10.4f} +{upper_err:>10.4f}")
+            
+        print("=" * 60)
+
+    def get_best_fit_parameters(self, sampler, param_labels, burnin=0, thin=1, method='median'):
+        """
+        Get the best-fit parameters from MCMC chain
+        
+        Parameters:
+        -----------
+        sampler : emcee.EnsembleSampler
+            The emcee sampler object from MCMC run
+        param_labels : list
+            List of parameter names
+        burnin : int, optional
+            Number of burn-in samples to discard. Default is 0.
+        thin : int, optional
+            Thin the chain by this factor. Default is 1.
+        method : str, optional
+            Method to determine best-fit: 'median', 'mean', or 'max_likelihood'. Default is 'median'.
+            
+        Returns:
+        --------
+        dict : best-fit parameters
+            Dictionary with parameter names as keys and best-fit values
+        """
+        # Get the flattened chain
+        samples = sampler.get_chain(discard=burnin, thin=thin, flat=True)
+        
+        if method == 'median':
+            best_fit = {label: np.median(samples[:, i]) for i, label in enumerate(param_labels) if i < samples.shape[1]}
+        elif method == 'mean':
+            best_fit = {label: np.mean(samples[:, i]) for i, label in enumerate(param_labels) if i < samples.shape[1]}
+        elif method == 'max_likelihood':
+            # Find sample with maximum likelihood
+            log_probs = sampler.get_log_prob(discard=burnin, thin=thin, flat=True)
+            best_idx = np.argmax(log_probs)
+            best_fit = {label: samples[best_idx, i] for i, label in enumerate(param_labels) if i < samples.shape[1]}
+        else:
+            raise ValueError("method must be 'median', 'mean', or 'max_likelihood'")
+            
+        return best_fit
