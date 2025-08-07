@@ -435,6 +435,22 @@ class stream:
         trimmed_stream.data.sfCrossMatch()  # Creates confirmed_sf_and_desi
         trimmed_stream.data.sfCrossMatch(False)  # Creates confirmed_sf_not_desi
         
+        # Step 5: Automatically compute VGSR for confirmed_sf_not_desi if it exists and has VHel data
+        if hasattr(trimmed_stream.data, 'confirmed_sf_not_desi') and len(trimmed_stream.data.confirmed_sf_not_desi) > 0:
+            if 'VHel' in trimmed_stream.data.confirmed_sf_not_desi.columns:
+                # Copy VHel and set 0 values to np.nan
+                vhel = np.array(trimmed_stream.data.confirmed_sf_not_desi['VHel'], dtype=float)
+                vhel[vhel == 0] = np.nan
+                
+                # Only compute VGSR if we have valid VHel values
+                if not np.all(np.isnan(vhel)):
+                    # Compute VGSR using the stream_functions
+                    trimmed_stream.data.confirmed_sf_not_desi['VGSR'] = stream_funcs.vhel_to_vgsr(
+                        np.array(trimmed_stream.data.confirmed_sf_not_desi['RAdeg']) * u.deg,
+                        np.array(trimmed_stream.data.confirmed_sf_not_desi['DEdeg']) * u.deg,
+                        vhel * u.km/u.s
+                    ).value
+        
         return trimmed_stream
 
     def isochrone(self, metallicity, age, dotter_directory='./data/dotter/'):
@@ -499,16 +515,26 @@ class StreamPlotter:
     """
     For really clean and easy plotting
     """
-    def __init__(self, stream_object, save_dir='plots/'):
+    def __init__(self, stream_or_mcmeta_object, save_dir='plots/'):
         """
-        Initializes the plotter with a stream object.
+        Initializes the plotter with a stream object or MCMeta object.
         
         Args:
-            stream_object (stream): An instance of your stream class.
+            stream_or_mcmeta_object: Either a stream instance or MCMeta instance
             save_dir (str): Directory to save plots.
         """
-        self.stream = stream_object
-        self.data = stream_object.data
+        # Check if it's an MCMeta object or stream object
+        if hasattr(stream_or_mcmeta_object, 'initial_params'):
+            # It's an MCMeta object
+            self.mcmeta = stream_or_mcmeta_object
+            self.stream = stream_or_mcmeta_object.stream
+            self.data = stream_or_mcmeta_object.stream.data
+        else:
+            # It's a stream object
+            self.stream = stream_or_mcmeta_object
+            self.data = stream_or_mcmeta_object.data
+            self.mcmeta = None
+            
         self.save_dir = save_dir
         # Create directory if it doesn't exist
         if not os.path.exists(self.save_dir):
@@ -955,15 +981,400 @@ class StreamPlotter:
         ax.set_ylim(-1.5, 8)
         ax.invert_yaxis()
         stream_funcs.plot_form(ax)
+
+    def sixD_plot(self, showStream=True, show_sf_only=False, background=True, save=False, stream_frame=True, galstream=False, show_cut=False):
+        """
+        Plots the stream phi1 vs phi2, vgsr, pmra, pmdec, and feh
+        
+        Parameters:
+        -----------
+        show_cut : bool, optional
+            Whether to show cut stars (red X markers). Default is True.
+        """
+        if stream_frame:
+            col_x = 'phi1'
+            col_x_ = 'phi1'
+            label_x = r'$\phi_1$'
+        else:
+            col_x = 'TARGET_RA'
+            col_x_ = 'RAdeg'
+            label_x = 'RA (deg)'
+
+        fig, ax = plt.subplots(5, 1, figsize=(10, 15))
+        
+        # Plot 1: phi2 vs phi1 (or DEC vs RA)
+        if stream_frame:
+            col_y0 = 'phi2'
+            col_y0_ = 'phi2'
+            label_y0 = r'$\phi_2$'
+        else:
+            col_y0 = 'TARGET_DEC'
+            col_y0_ = 'DEdeg'
+            label_y0 = 'DEC (deg)'
+            
+        if showStream:
+            ax[0].scatter(
+                self.data.confirmed_sf_and_desi[col_x],
+                self.data.confirmed_sf_and_desi[col_y0],
+                **self.plot_params['sf_in_desi']
+            )
+            ax[1].scatter(
+                self.data.confirmed_sf_and_desi[col_x],
+                self.data.confirmed_sf_and_desi['VGSR'],
+                **self.plot_params['sf_in_desi']
+            )
+            ax[2].scatter(
+                self.data.confirmed_sf_and_desi[col_x],
+                self.data.confirmed_sf_and_desi['PMRA'],
+                **self.plot_params['sf_in_desi']
+            )
+            ax[3].scatter(
+                self.data.confirmed_sf_and_desi[col_x],
+                self.data.confirmed_sf_and_desi['PMDEC'],
+                **self.plot_params['sf_in_desi']
+            )
+            ax[4].scatter(
+                self.data.confirmed_sf_and_desi[col_x],
+                self.data.confirmed_sf_and_desi['FEH'],
+                **self.plot_params['sf_in_desi']
+            )
+            
+            if hasattr(self.data, 'cut_confirmed_sf_and_desi') and show_cut:
+                ax[0].scatter(
+                    self.data.cut_confirmed_sf_and_desi[col_x],
+                    self.data.cut_confirmed_sf_and_desi[col_y0],
+                    **self.plot_params['sf_in_desi_notsel']
+                )
+                ax[1].scatter(
+                    self.data.cut_confirmed_sf_and_desi[col_x],
+                    self.data.cut_confirmed_sf_and_desi['VGSR'],
+                    **self.plot_params['sf_in_desi_notsel']
+                )
+                ax[2].scatter(
+                    self.data.cut_confirmed_sf_and_desi[col_x],
+                    self.data.cut_confirmed_sf_and_desi['PMRA'],
+                    **self.plot_params['sf_in_desi_notsel']
+                )
+                ax[3].scatter(
+                    self.data.cut_confirmed_sf_and_desi[col_x],
+                    self.data.cut_confirmed_sf_and_desi['PMDEC'],
+                    **self.plot_params['sf_in_desi_notsel']
+                )
+                ax[4].scatter(
+                    self.data.cut_confirmed_sf_and_desi[col_x],
+                    self.data.cut_confirmed_sf_and_desi['FEH'],
+                    **self.plot_params['sf_in_desi_notsel']
+                )
                 
+            if stream_frame and galstream and hasattr(self.data, 'SoI_galstream') and self.data.SoI_galstream is not None:
+                ax[0].plot(
+                    self.data.SoI_galstream.gal_phi1,
+                    self.data.SoI_galstream.gal_phi2,
+                    **self.plot_params['galstream_track']
+                )
+            elif not stream_frame and galstream and hasattr(self.data, 'SoI_galstream') and self.data.SoI_galstream is not None:
+                ax[0].plot(
+                    self.data.SoI_galstream.track.ra,
+                    self.data.SoI_galstream.track.dec,
+                    **self.plot_params['galstream_track']
+                )
+                
+        if show_sf_only:
+            ax[0].scatter(
+                self.data.confirmed_sf_not_desi[col_x_],
+                self.data.confirmed_sf_not_desi[col_y0_],
+                **self.plot_params['sf_not_desi']
+            )
+            ax[1].scatter(
+                self.data.confirmed_sf_not_desi[col_x_],
+                self.data.confirmed_sf_not_desi['VGSR'],
+                **self.plot_params['sf_not_desi']
+            )
+            ax[2].scatter(
+                self.data.confirmed_sf_not_desi[col_x_],
+                self.data.confirmed_sf_not_desi['pmRA'],
+                **self.plot_params['sf_not_desi']
+            )
+            ax[3].scatter(
+                self.data.confirmed_sf_not_desi[col_x_],
+                self.data.confirmed_sf_not_desi['pmDE'],
+                **self.plot_params['sf_not_desi']
+            )
+            # Note: FEH not available in sf_not_desi, skip this subplot
+            
+        if background:
+            ax[0].scatter(
+                self.data.desi_data[col_x],
+                self.data.desi_data[col_y0],
+                **self.plot_params['background']
+            )
+            ax[1].scatter(
+                self.data.desi_data[col_x],
+                self.data.desi_data['VGSR'],
+                **self.plot_params['background']
+            )
+            ax[2].scatter(
+                self.data.desi_data[col_x],
+                self.data.desi_data['PMRA'],
+                **self.plot_params['background']
+            )
+            ax[3].scatter(
+                self.data.desi_data[col_x],
+                self.data.desi_data['PMDEC'],
+                **self.plot_params['background']
+            )
+            ax[4].scatter(
+                self.data.desi_data[col_x],
+                self.data.desi_data['FEH'],
+                **self.plot_params['background']
+            )
+
+        # Set y-axis limits based on stream data if available
+        if showStream and hasattr(self.data, 'confirmed_sf_and_desi') and len(self.data.confirmed_sf_and_desi) > 0:
+            # VGSR limits
+            vgsr_data = [self.data.confirmed_sf_and_desi['VGSR']]
+            if hasattr(self.data, 'cut_confirmed_sf_and_desi') and len(self.data.cut_confirmed_sf_and_desi) > 0 and show_cut:
+                vgsr_data.append(self.data.cut_confirmed_sf_and_desi['VGSR'])
+            vgsr_combined = np.concatenate(vgsr_data)
+            ax[1].set_ylim(np.nanmin(vgsr_combined) - 50, np.nanmax(vgsr_combined) + 50)
+            
+            # Proper motion limits  
+            pmra_data = [self.data.confirmed_sf_and_desi['PMRA']]
+            pmdec_data = [self.data.confirmed_sf_and_desi['PMDEC']]
+            if hasattr(self.data, 'cut_confirmed_sf_and_desi') and len(self.data.cut_confirmed_sf_and_desi) > 0 and show_cut:
+                pmra_data.append(self.data.cut_confirmed_sf_and_desi['PMRA'])
+                pmdec_data.append(self.data.cut_confirmed_sf_and_desi['PMDEC'])
+            pmra_combined = np.concatenate(pmra_data)
+            pmdec_combined = np.concatenate(pmdec_data)
+            ax[2].set_ylim(np.nanmin(pmra_combined) - 5, np.nanmax(pmra_combined) + 5)
+            ax[3].set_ylim(np.nanmin(pmdec_combined) - 5, np.nanmax(pmdec_combined) + 5)
+
+        # Set metallicity limits
+        ax[4].set_ylim(-4, -0.5)
+        
+        # Labels and formatting
+        ax[0].legend(loc='upper left', ncol=4)
+        ax[0].set_ylabel(label_y0)
+        ax[1].set_ylabel(r'V$_{GSR}$ (km/s)')
+        ax[2].set_ylabel(r'$\mu_{\alpha}$ [mas/yr]')
+        ax[3].set_ylabel(r'$\mu_{\delta}$ [mas/yr]')
+        ax[4].set_ylabel(r'[Fe/H]')
+        ax[-1].set_xlabel(label_x)
+        
+        for a in ax:
+            stream_funcs.plot_form(a)
+            
+        if save:
+            plt.tight_layout()
+            plt.savefig(f"{self.save_dir}sixD_plot_{self.stream.streamName}.png", dpi=300, bbox_inches='tight')
+            
+        return fig, ax
+    
+    def gaussian_mixture_plot(self, showStream=True, show_sf_only=False, background=True, save=False):
+        """
+        Plots Gaussian mixture model distributions for stream vs background in 4 dimensions:
+        VGSR, FEH, PMRA, PMDEC
+        
+        Uses truncated Gaussians based on the selection cuts applied to the data.
+        Requires MCMeta object to be initialized with initial parameters.
+        """
+        if self.mcmeta is None:
+            raise ValueError("MCMeta object required for gaussian_mixture_plot. Initialize StreamPlotter with MCMeta object.")
+            
+        colors = list(plt.rcParams["axes.prop_cycle"].by_key()["color"])
+        from scipy.stats import truncnorm
+        
+        fig, axes = plt.subplots(2, 2, figsize=(9, 9))
+        
+        # Get data arrays
+        desi_data = self.data.desi_data
+        sf_data = self.data.confirmed_sf_and_desi if hasattr(self.data, 'confirmed_sf_and_desi') else pd.DataFrame()
+        
+        # Define plotting parameters
+        alpha_stream = 0.7
+        alpha_bg = 0.5
+        bins = 50
+        
+        # Estimate mixture weights
+        n_stream = len(sf_data) if len(sf_data) > 0 else 1
+        n_total = len(desi_data)
+        stream_weight = n_stream / n_total
+        bg_weight = 1 - stream_weight
+        
+        # VGSR plot (top left)
+        ax = axes[0, 0]
+        if background:
+            ax.hist(desi_data['VGSR'], density=True, color='lightgrey', bins=bins, alpha=0.7, label='DESI Data')
+        
+        if showStream and len(sf_data) > 0:
+            ax.hist(sf_data['VGSR'], density=True, color='lightblue', bins=bins, alpha=0.8, label='SF Stars')
+            
+        # Plot truncated Gaussian components
+        vgsr_range = np.linspace(self.mcmeta.truncation_params['vgsr_min'] - 50, 
+                                self.mcmeta.truncation_params['vgsr_max'] + 50, 200)
+        
+        # Stream component (using mean of spline points as approximation)
+        stream_vgsr_mean = np.mean(self.mcmeta.initial_params['vgsr_spline_points'])
+        stream_vgsr_std = 10**self.mcmeta.initial_params['lsigvgsr']
+        
+        # Background component
+        bg_vgsr_mean = self.mcmeta.initial_params['bv']
+        bg_vgsr_std = 10**self.mcmeta.initial_params['lsigbv']
+        
+        # Stream truncated normal
+        stream_a = (self.mcmeta.truncation_params['vgsr_min'] - stream_vgsr_mean) / stream_vgsr_std
+        stream_b = (self.mcmeta.truncation_params['vgsr_max'] - stream_vgsr_mean) / stream_vgsr_std
+        stream_vgsr_pdf = truncnorm.pdf(vgsr_range, stream_a, stream_b, loc=stream_vgsr_mean, scale=stream_vgsr_std)
+        
+        # Background truncated normal
+        bg_a = (self.mcmeta.truncation_params['vgsr_min'] - bg_vgsr_mean) / bg_vgsr_std
+        bg_b = (self.mcmeta.truncation_params['vgsr_max'] - bg_vgsr_mean) / bg_vgsr_std
+        bg_vgsr_pdf = truncnorm.pdf(vgsr_range, bg_a, bg_b, loc=bg_vgsr_mean, scale=bg_vgsr_std)
+        
+        ax.plot(vgsr_range, stream_weight * stream_vgsr_pdf, ':', color=colors[0], label='Stream Component', lw=3)
+        ax.plot(vgsr_range, bg_weight * bg_vgsr_pdf, ':', color=colors[1], label='Background Component', lw=3)
+        ax.plot(vgsr_range, stream_weight * stream_vgsr_pdf + bg_weight * bg_vgsr_pdf, 'k-', label='Total Model', lw=3)
+        
+        ax.set_xlabel(r'V$_{GSR}$ (km/s)', fontsize=12)
+        ax.set_xlim(self.mcmeta.truncation_params['vgsr_min'] - 50, self.mcmeta.truncation_params['vgsr_max'] + 50)
+        ax.legend(fontsize='large')
+        ax.tick_params(axis='both', labelsize=14)
+        stream_funcs.plot_form(ax)
+        
+        # FEH plot (top right)
+        ax = axes[0, 1]
+        if background:
+            ax.hist(desi_data['FEH'], density=True, color='lightgrey', bins=bins, alpha=0.7)
+            
+        if showStream and len(sf_data) > 0:
+            ax.hist(sf_data['FEH'], density=True, color='lightblue', bins=bins, alpha=0.8)
+            
+        # Plot truncated Gaussian components
+        feh_range = np.linspace(self.mcmeta.truncation_params['feh_min'] - 0.5, 
+                               self.mcmeta.truncation_params['feh_max'] + 0.5, 200)
+        
+        # Stream component
+        stream_feh_mean = self.mcmeta.initial_params['feh1']
+        stream_feh_std = 10**self.mcmeta.initial_params['lsigfeh']
+        
+        # Background component
+        bg_feh_mean = self.mcmeta.initial_params['bfeh']
+        bg_feh_std = 10**self.mcmeta.initial_params['lsigbfeh']
+        
+        # Stream truncated normal
+        stream_a = (self.mcmeta.truncation_params['feh_min'] - stream_feh_mean) / stream_feh_std
+        stream_b = (self.mcmeta.truncation_params['feh_max'] - stream_feh_mean) / stream_feh_std
+        stream_feh_pdf = truncnorm.pdf(feh_range, stream_a, stream_b, loc=stream_feh_mean, scale=stream_feh_std)
+        
+        # Background truncated normal
+        bg_a = (self.mcmeta.truncation_params['feh_min'] - bg_feh_mean) / bg_feh_std
+        bg_b = (self.mcmeta.truncation_params['feh_max'] - bg_feh_mean) / bg_feh_std
+        bg_feh_pdf = truncnorm.pdf(feh_range, bg_a, bg_b, loc=bg_feh_mean, scale=bg_feh_std)
+        
+        ax.plot(feh_range, stream_weight * stream_feh_pdf, ':', color=colors[0], lw=3)
+        ax.plot(feh_range, bg_weight * bg_feh_pdf, ':', color=colors[1], lw=3)
+        ax.plot(feh_range, stream_weight * stream_feh_pdf + bg_weight * bg_feh_pdf, 'k-', lw=3)
+        
+        ax.set_xlabel('[Fe/H]', fontsize=12)
+        ax.set_xlim(self.mcmeta.truncation_params['feh_min'] - 0.5, self.mcmeta.truncation_params['feh_max'] + 0.5)
+        ax.tick_params(axis='both', labelsize=14)
+        stream_funcs.plot_form(ax)
+        
+        # PMRA plot (bottom left)
+        ax = axes[1, 0]
+        if background:
+            ax.hist(desi_data['PMRA'], density=True, color='lightgrey', bins=bins, alpha=0.7)
+            
+        if showStream and len(sf_data) > 0:
+            ax.hist(sf_data['PMRA'], density=True, color='lightblue', bins=bins, alpha=0.8)
+            
+        # Plot truncated Gaussian components
+        pmra_range = np.linspace(self.mcmeta.truncation_params['pmra_min'] - 15, 
+                                self.mcmeta.truncation_params['pmra_max'] + 15, 200)
+        
+        # Stream component (using mean of spline points as approximation)
+        stream_pmra_mean = np.mean(self.mcmeta.initial_params['pmra_spline_points'])
+        stream_pmra_std = 10**self.mcmeta.initial_params['lsigpmra']
+        
+        # Background component
+        bg_pmra_mean = self.mcmeta.initial_params['bpmra']
+        bg_pmra_std = 10**self.mcmeta.initial_params['lsigbpmra']
+        
+        # Stream truncated normal
+        stream_a = (self.mcmeta.truncation_params['pmra_min'] - stream_pmra_mean) / stream_pmra_std
+        stream_b = (self.mcmeta.truncation_params['pmra_max'] - stream_pmra_mean) / stream_pmra_std
+        stream_pmra_pdf = truncnorm.pdf(pmra_range, stream_a, stream_b, loc=stream_pmra_mean, scale=stream_pmra_std)
+        
+        # Background truncated normal
+        bg_a = (self.mcmeta.truncation_params['pmra_min'] - bg_pmra_mean) / bg_pmra_std
+        bg_b = (self.mcmeta.truncation_params['pmra_max'] - bg_pmra_mean) / bg_pmra_std
+        bg_pmra_pdf = truncnorm.pdf(pmra_range, bg_a, bg_b, loc=bg_pmra_mean, scale=bg_pmra_std)
+        
+        ax.plot(pmra_range, stream_weight * stream_pmra_pdf, ':', color=colors[0], lw=3)
+        ax.plot(pmra_range, bg_weight * bg_pmra_pdf, ':', color=colors[1], lw=3)
+        ax.plot(pmra_range, stream_weight * stream_pmra_pdf + bg_weight * bg_pmra_pdf, 'k-', lw=3)
+        
+ 
+        ax.set_xlabel(r'$\mu_{RA}$ (mas/yr)', fontsize=12)
+        ax.set_xlim(self.mcmeta.truncation_params['pmra_min'] - 15, self.mcmeta.truncation_params['pmra_max'] + 15)
+        ax.tick_params(axis='both', labelsize=14)
+        stream_funcs.plot_form(ax)
+        
+        # PMDEC plot (bottom right)
+        ax = axes[1, 1]
+        if background:
+            ax.hist(desi_data['PMDEC'], density=True, color='lightgrey', bins=bins, alpha=0.7)
+            
+        if showStream and len(sf_data) > 0:
+            ax.hist(sf_data['PMDEC'], density=True, color='lightblue', bins=bins, alpha=0.8)
+            
+        # Plot truncated Gaussian components
+        pmdec_range = np.linspace(self.mcmeta.truncation_params['pmdec_min'] - 15, 
+                                 self.mcmeta.truncation_params['pmdec_max'] + 15, 200)
+        
+        # Stream component (using mean of spline points as approximation)
+        stream_pmdec_mean = np.mean(self.mcmeta.initial_params['pmdec_spline_points'])
+        stream_pmdec_std = 10**self.mcmeta.initial_params['lsigpmdec']
+        
+        # Background component
+        bg_pmdec_mean = self.mcmeta.initial_params['bpmdec']
+        bg_pmdec_std = 10**self.mcmeta.initial_params['lsigbpmdec']
+        
+        # Stream truncated normal
+        stream_a = (self.mcmeta.truncation_params['pmdec_min'] - stream_pmdec_mean) / stream_pmdec_std
+        stream_b = (self.mcmeta.truncation_params['pmdec_max'] - stream_pmdec_mean) / stream_pmdec_std
+        stream_pmdec_pdf = truncnorm.pdf(pmdec_range, stream_a, stream_b, loc=stream_pmdec_mean, scale=stream_pmdec_std)
+        
+        # Background truncated normal
+        bg_a = (self.mcmeta.truncation_params['pmdec_min'] - bg_pmdec_mean) / bg_pmdec_std
+        bg_b = (self.mcmeta.truncation_params['pmdec_max'] - bg_pmdec_mean) / bg_pmdec_std
+        bg_pmdec_pdf = truncnorm.pdf(pmdec_range, bg_a, bg_b, loc=bg_pmdec_mean, scale=bg_pmdec_std)
+        
+        ax.plot(pmdec_range, stream_weight * stream_pmdec_pdf, ':', color=colors[0], lw=3)
+        ax.plot(pmdec_range, bg_weight * bg_pmdec_pdf, ':', color=colors[1], lw=3)
+        ax.plot(pmdec_range, stream_weight * stream_pmdec_pdf + bg_weight * bg_pmdec_pdf, 'k-', lw=3)
+        
+        ax.set_xlabel(r'$\mu_{DEC}$ (mas/yr)', fontsize=12)
+        ax.set_xlim(self.mcmeta.truncation_params['pmdec_min'] - 15, self.mcmeta.truncation_params['pmdec_max'] + 15)
+        ax.tick_params(axis='both', labelsize=14)
+        stream_funcs.plot_form(ax)
+        
+        plt.tight_layout()
+        
+        if save:
+            plt.savefig(f"{self.save_dir}gaussian_mixture_{self.stream.streamName}.png", dpi=300, bbox_inches='tight')
+            
+        return fig, axes
+
+
 class MCMeta:
     """
     For creating and plotting a spline track of the stream.
     """
-    def __init__(self, no_of_spline_points, stream_object):
+    def __init__(self, no_of_spline_points, stream_object, sf_data, truncation_params=None):
         self.stream = stream_object
         self.no_of_spline_points = no_of_spline_points
-
+        self.sf_data = sf_data
         if self.no_of_spline_points == 1:
             self.spline_k = 1
         elif self.no_of_spline_points > 3:
@@ -971,6 +1382,82 @@ class MCMeta:
         else:
             self.spline_k = self.no_of_spline_points - 1
 
-        print('Making intitial guess based of galstream and STREAMFINDER...')
+        self.phi1_spline_points = np.linspace(self.stream.data.SoI_streamfinder['phi1'].min()-5, self.stream.data.SoI_streamfinder['phi1'].max()+5, self.no_of_spline_points)
+
+        # Store truncation parameters for plotting
+        if truncation_params is None:
+            # Default truncation values based on data range
+            data = self.stream.data.desi_data
+            self.truncation_params = {
+                'vgsr_min': data['VGSR'].min(),
+                'vgsr_max': data['VGSR'].max(),
+                'feh_min': data['FEH'].min(),
+                'feh_max': data['FEH'].max(),
+                'pmra_min': data['PMRA'].min(),
+                'pmra_max': data['PMRA'].max(),
+                'pmdec_min': data['PMDEC'].min(),
+                'pmdec_max': data['PMDEC'].max()
+            }
+        else:
+            self.truncation_params = truncation_params
+
+        self.param_labels = [
+            "vgsr_spline_points", "lsigvgsr",
+            "feh1", "lsigfeh",
+            "pmra_spline_points", "lsigpmra",
+            "pmdec_spline_points", "lsigpmdec",
+            "bv", "lsigbv", "bfeh", "lsigbfeh", "bpmra", "lsigbpmra", "bpmdec", "lsigbpmdec"
+        ]
+
+        # Initialize the initial_params dictionary
+        self.initial_params = {}
+
+        print('Making stream initial guess based on galstream and STREAMFINDER...')
+        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['VGSR'].values, 2)
+        self.vgsr_fit = np.poly1d(p)
+        self.initial_params['lsigvgsr'] = np.log10(self.sf_data['VGSR'].values.std())
+        self.initial_params['vgsr_spline_points'] = self.vgsr_fit(self.phi1_spline_points)
+        print(f"Stream VGSR dispersion from trimmed SF: {10**self.initial_params['lsigvgsr']:.2f} km/s")
+
+        self.initial_params['feh1'] = self.sf_data['FEH'].values.mean()
+        self.initial_params['lsigfeh'] = np.log10(self.sf_data['FEH'].values.std())
+        print(f'Stream mean metallicity from trimmed SF: {self.initial_params["feh1"]:.2f} +- {10**self.initial_params["lsigfeh"]:.3f} dex')
+
+        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMRA'].values, 2)
+        self.pmra_fit = np.poly1d(p)
+        self.initial_params['lsigpmra'] = np.log10(self.sf_data['PMRA'].values.std())
+        self.initial_params['pmra_spline_points'] = self.pmra_fit(self.phi1_spline_points)
+        print(f"Stream PMRA dispersion from trimmed SF: {10**self.initial_params['lsigpmra']:.2f} mas/yr")
+
+        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMDEC'].values, 2)
+        self.pmdec_fit = np.poly1d(p)
+        self.initial_params['lsigpmdec'] = np.log10(self.sf_data['PMDEC'].values.std())
+        self.initial_params['pmdec_spline_points'] = self.pmdec_fit(self.phi1_spline_points)
+        print(f"Stream PMDEC dispersion from trimmed SF: {10**self.initial_params['lsigpmdec']:.2f} mas/yr")
+
+        print('Making background initial guess...')
+        self.initial_params['bv'] = np.mean(np.array(self.stream.data.desi_data['VGSR']))
+        self.initial_params['lsigbv'] = np.log10(np.std(np.array(self.stream.data.desi_data['VGSR'])))
+        print(f"Background velocity: {self.initial_params['bv']:.2f} +- {10**self.initial_params['lsigbv']:.2f} km/s")
+
+        self.initial_params['bfeh'] = np.mean(np.array(self.stream.data.desi_data['FEH']))
+        self.initial_params['lsigbfeh'] = np.log10(np.std(np.array(self.stream.data.desi_data['FEH'])))
+        print(f"Background metallicity: {self.initial_params['bfeh']:.2f} +- {10**self.initial_params['lsigbfeh']:.3f} dex")
+
+        self.initial_params['bpmra'] = np.mean(np.array(self.stream.data.desi_data['PMRA']))
+        self.initial_params['lsigbpmra'] = np.log10(np.std(np.array(self.stream.data.desi_data['PMRA'])))
+        print(f"Background PMRA: {self.initial_params['bpmra']:.2f} +- {10**self.initial_params['lsigbpmra']:.2f} mas/yr")
+
+        self.initial_params['bpmdec'] = np.mean(np.array(self.stream.data.desi_data['PMDEC']))
+        self.initial_params['lsigbpmdec'] = np.log10(np.std(np.array(self.stream.data.desi_data['PMDEC'])))
+        print(f"Background PMDEC: {self.initial_params['bpmdec']:.2f} +- {10**self.initial_params['lsigbpmdec']:.2f} mas/yr")
+
+    def create_plotter(self, save_dir='plots/'):
+        """
+        Create a StreamPlotter object initialized with this MCMeta instance.
         
-    
+        Returns:
+            StreamPlotter: A plotter object that can access both stream and MCMeta functionality.
+        """
+        return StreamPlotter(self, save_dir=save_dir)
+
