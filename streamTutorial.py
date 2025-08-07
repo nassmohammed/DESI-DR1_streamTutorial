@@ -984,7 +984,7 @@ class StreamPlotter:
         stream_funcs.plot_form(ax)
 
     def sixD_plot(self, showStream=True, show_sf_only=False, background=True, save=False, stream_frame=True, galstream=False, show_cut=False, 
-                  show_initial_splines=False, show_optimized_splines=False, show_sf_errors=True):
+                  show_initial_splines=False, show_optimized_splines=False, show_mcmc_splines=False, show_sf_errors=True):
         """
         Plots the stream phi1 vs phi2, vgsr, pmra, pmdec, and feh
         
@@ -996,6 +996,8 @@ class StreamPlotter:
             Whether to show initial guess splines in black. Default is False.
         show_optimized_splines : bool, optional
             Whether to show optimized splines in red. Default is False.
+        show_mcmc_splines : bool, optional
+            Whether to show MCMC results splines in blue. Default is False.
         show_sf_errors : bool, optional
             Whether to show error bars on StreamFinder stars. Default is True.
         """
@@ -1286,11 +1288,93 @@ class StreamPlotter:
                                   label='Optimized [Fe/H]', alpha=0.8)
                     except Exception as e:
                         print(f"Warning: Could not plot optimized splines: {e}")
+            
+            # Plot MCMC splines in blue (requires external meds dictionary with MCMC results)
+            if show_mcmc_splines and hasattr(self.mcmeta, 'phi1_spline_points'):
+                try:
+                    # Try to access meds from the global namespace or pass it as parameter
+                    # This is a bit of a hack - in a proper implementation you'd pass meds as a parameter
+                    import inspect
+                    frame = inspect.currentframe()
+                    try:
+                        # Look for meds in the calling frame's globals
+                        caller_frame = frame.f_back
+                        while caller_frame:
+                            if 'meds' in caller_frame.f_globals:
+                                meds = caller_frame.f_globals['meds']
+                                break
+                            elif 'meds' in caller_frame.f_locals:
+                                meds = caller_frame.f_locals['meds']
+                                break
+                            caller_frame = caller_frame.f_back
+                        else:
+                            raise NameError("meds not found in calling context")
+                            
+                        # Extract spline points from meds dictionary
+                        no_of_spline_points = len(self.mcmeta.phi1_spline_points)
+                        
+                        # Build the spline arrays from the flattened meds
+                        vgsr_mcmc_points = []
+                        pmra_mcmc_points = []  
+                        pmdec_mcmc_points = []
+                        
+                        # Extract vgsr spline points
+                        for i in range(1, no_of_spline_points + 1):
+                            vgsr_mcmc_points.append(meds[f'vgsr{i}'])
+                            
+                        # Extract pmra spline points  
+                        for i in range(1, no_of_spline_points + 1):
+                            pmra_mcmc_points.append(meds[f'pmra{i}'])
+                            
+                        # Extract pmdec spline points
+                        for i in range(1, no_of_spline_points + 1):
+                            pmdec_mcmc_points.append(meds[f'pmdec{i}'])
+                        
+                        # Convert to arrays
+                        vgsr_mcmc_points = np.array(vgsr_mcmc_points)
+                        pmra_mcmc_points = np.array(pmra_mcmc_points)  
+                        pmdec_mcmc_points = np.array(pmdec_mcmc_points)
+                        
+                        # VGSR spline
+                        vgsr_mcmc = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            vgsr_mcmc_points, k=2
+                        )
+                        ax[1].plot(phi1_spline_plot, vgsr_mcmc, 'b-', linewidth=2, 
+                                  label='MCMC Spline', alpha=0.8)
+                        
+                        # PMRA spline
+                        pmra_mcmc = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            pmra_mcmc_points, k=2
+                        )
+                        ax[2].plot(phi1_spline_plot, pmra_mcmc, 'b-', linewidth=2, 
+                                  label='MCMC Spline', alpha=0.8)
+                        
+                        # PMDEC spline
+                        pmdec_mcmc = stream_funcs.apply_spline(
+                            phi1_spline_plot, self.mcmeta.phi1_spline_points, 
+                            pmdec_mcmc_points, k=2
+                        )
+                        ax[3].plot(phi1_spline_plot, pmdec_mcmc, 'b-', linewidth=2, 
+                                  label='MCMC Spline', alpha=0.8)
+                        
+                        # FEH constant line
+                        feh_mcmc = np.full_like(phi1_spline_plot, meds['feh1'])
+                        ax[4].plot(phi1_spline_plot, feh_mcmc, 'b-', linewidth=2, 
+                                  label='MCMC [Fe/H]', alpha=0.8)
+                                  
+                    finally:
+                        del frame
+                        
+                except Exception as e:
+                    print(f"Warning: Could not plot MCMC splines: {e}")
+                    print("Make sure 'meds' dictionary with MCMC results is available in the calling scope")
         
         # Labels and formatting
-        if show_initial_splines or show_optimized_splines:
+        if show_initial_splines or show_optimized_splines or show_mcmc_splines:
             # Add legends to kinematic plots if splines are shown
-            for i in [1]:
+            for i in [1]:  # Show legends on all kinematic plots
                 if ax[i].get_lines():  # Only add legend if there are lines to show
                     ax[i].legend(loc='best', fontsize='small')
         
