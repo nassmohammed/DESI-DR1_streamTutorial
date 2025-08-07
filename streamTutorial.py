@@ -25,6 +25,7 @@ import feh_correct
 import warnings
 from astropy.utils.exceptions import AstropyDeprecationWarning
 import copy
+import multiprocessing
 # Suppress specific Astropy deprecation warnings
 warnings.filterwarnings("ignore", category=AstropyDeprecationWarning, module='gala.dynamics.core')
 
@@ -1600,3 +1601,241 @@ class MCMeta:
             StreamPlotter: A plotter object that can access both stream and MCMeta functionality.
         """
         return StreamPlotter(self, save_dir=save_dir)
+
+    def plot_chains(self, sampler, param_labels, save=False, burnin=0, thin=1, figsize=(12, 8)):
+        """
+        Plot MCMC chains for all parameters to check convergence
+        
+        Parameters:
+        -----------
+        sampler : emcee.EnsembleSampler
+            The emcee sampler object from MCMC run
+        param_labels : list
+            List of parameter names for labeling
+        save : bool, optional
+            Whether to save the plot. Default is False.
+        burnin : int, optional
+            Number of burn-in samples to discard. Default is 0.
+        thin : int, optional
+            Thin the chain by this factor. Default is 1.
+        figsize : tuple, optional
+            Figure size. Default is (12, 8).
+            
+        Returns:
+        --------
+        fig, axes : matplotlib figure and axes
+            The plot figure and axes
+        """
+        # Get the chain
+        samples = sampler.get_chain(discard=burnin, thin=thin)
+        nwalkers, nsteps, ndim = samples.shape
+        
+        # Create subplots
+        ncols = 3
+        nrows = int(np.ceil(ndim / ncols))
+        fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
+        
+        # Handle different subplot configurations
+        if nrows == 1 and ncols == 1:
+            axes = [axes]
+        elif nrows == 1 or ncols == 1:
+            axes = axes.flatten()
+        else:
+            axes = axes.flatten()
+        
+        # Plot each parameter
+        for i in range(ndim):
+            ax = axes[i]
+            
+            # Plot all walker chains
+            for j in range(nwalkers):
+                ax.plot(samples[j, :, i], alpha=0.3, color='k', lw=0.5)
+            
+            # Set labels
+            param_name = param_labels[i] if i < len(param_labels) else f'param_{i}'
+            ax.set_title(param_name, fontsize=10)
+            ax.set_xlabel('Step')
+            ax.set_ylabel('Value')
+            stream_funcs.plot_form(ax)
+        
+        # Hide unused subplots
+        for i in range(ndim, len(axes)):
+            axes[i].set_visible(False)
+            
+        plt.tight_layout()
+        
+        if save:
+            save_dir = 'plots/'
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+            plt.savefig(f"{save_dir}mcmc_chains_{self.stream.streamName}.png", 
+                       dpi=300, bbox_inches='tight')
+        
+        return fig, axes
+
+    def plot_corner(self, sampler, param_labels, save=False, burnin=0, thin=1, truths=None, 
+                   show_titles=True, title_fmt=".3f", quantiles=[0.16, 0.5, 0.84]):
+        """
+        Create a corner plot of the MCMC posterior distributions
+        
+        Parameters:
+        -----------
+        sampler : emcee.EnsembleSampler
+            The emcee sampler object from MCMC run
+        param_labels : list
+            List of parameter names for labeling
+        save : bool, optional
+            Whether to save the plot. Default is False.
+        burnin : int, optional
+            Number of burn-in samples to discard. Default is 0.
+        thin : int, optional
+            Thin the chain by this factor. Default is 1.
+        truths : array_like, optional
+            True parameter values to overplot. Default is None.
+        show_titles : bool, optional
+            Whether to show parameter value titles. Default is True.
+        title_fmt : str, optional
+            Format string for parameter titles. Default is ".3f".
+        quantiles : list, optional
+            Quantiles to show in histograms. Default is [0.16, 0.5, 0.84].
+            
+        Returns:
+        --------
+        fig : matplotlib figure
+            The corner plot figure
+        """
+        # Get the flattened chain
+        samples = sampler.get_chain(discard=burnin, thin=thin, flat=True)
+        
+        # Create the corner plot
+        fig = corner.corner(
+            samples, 
+            labels=param_labels,
+            truths=truths,
+            show_titles=show_titles,
+            title_fmt=title_fmt,
+            quantiles=quantiles,
+            plot_datapoints=False,
+            fill_contours=True,
+            levels=(0.68, 0.95),
+            color='blue',
+            hist_kwargs={'density': True}
+        )
+        
+        if save:
+            save_dir = 'plots/'
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+            plt.savefig(f"{save_dir}corner_plot_{self.stream.streamName}.png", 
+                       dpi=300, bbox_inches='tight')
+        
+        return fig
+
+    def get_parameter_summary(self, sampler, param_labels, burnin=0, thin=1, percentiles=[16, 50, 84]):
+        """
+        Get summary statistics for MCMC parameters
+        
+        Parameters:
+        -----------
+        sampler : emcee.EnsembleSampler
+            The emcee sampler object from MCMC run
+        param_labels : list
+            List of parameter names
+        burnin : int, optional
+            Number of burn-in samples to discard. Default is 0.
+        thin : int, optional
+            Thin the chain by this factor. Default is 1.
+        percentiles : list, optional
+            Percentiles to compute. Default is [16, 50, 84] for median and 1-sigma.
+            
+        Returns:
+        --------
+        dict : parameter summary
+            Dictionary with parameter names as keys and [lower, median, upper] as values
+        """
+        # Get the flattened chain
+        samples = sampler.get_chain(discard=burnin, thin=thin, flat=True)
+        
+        summary = {}
+        for i, label in enumerate(param_labels):
+            if i < samples.shape[1]:
+                percentile_values = np.percentile(samples[:, i], percentiles)
+                summary[label] = {
+                    'lower': percentile_values[0],
+                    'median': percentile_values[1], 
+                    'upper': percentile_values[2],
+                    'mean': np.mean(samples[:, i]),
+                    'std': np.std(samples[:, i])
+                }
+            
+        return summary
+
+    def print_parameter_summary(self, sampler, param_labels, burnin=0, thin=1):
+        """
+        Print a formatted summary of MCMC parameter results
+        
+        Parameters:
+        -----------
+        sampler : emcee.EnsembleSampler
+            The emcee sampler object from MCMC run
+        param_labels : list
+            List of parameter names
+        burnin : int, optional
+            Number of burn-in samples to discard. Default is 0.
+        thin : int, optional
+            Thin the chain by this factor. Default is 1.
+        """
+        summary = self.get_parameter_summary(sampler, param_labels, burnin=burnin, thin=thin)
+        
+        print("\nMCMC Parameter Summary:")
+        print("=" * 60)
+        print(f"{'Parameter':<20} {'Median':<12} {'Lower':<12} {'Upper':<12}")
+        print("-" * 60)
+        
+        for param, stats in summary.items():
+            median = stats['median']
+            lower_err = stats['median'] - stats['lower']
+            upper_err = stats['upper'] - stats['median']
+            
+            print(f"{param:<20} {median:>11.4f} -{lower_err:>10.4f} +{upper_err:>10.4f}")
+            
+        print("=" * 60)
+
+    def get_best_fit_parameters(self, sampler, param_labels, burnin=0, thin=1, method='median'):
+        """
+        Get the best-fit parameters from MCMC chain
+        
+        Parameters:
+        -----------
+        sampler : emcee.EnsembleSampler
+            The emcee sampler object from MCMC run
+        param_labels : list
+            List of parameter names
+        burnin : int, optional
+            Number of burn-in samples to discard. Default is 0.
+        thin : int, optional
+            Thin the chain by this factor. Default is 1.
+        method : str, optional
+            Method to determine best-fit: 'median', 'mean', or 'max_likelihood'. Default is 'median'.
+            
+        Returns:
+        --------
+        dict : best-fit parameters
+            Dictionary with parameter names as keys and best-fit values
+        """
+        # Get the flattened chain
+        samples = sampler.get_chain(discard=burnin, thin=thin, flat=True)
+        
+        if method == 'median':
+            best_fit = {label: np.median(samples[:, i]) for i, label in enumerate(param_labels) if i < samples.shape[1]}
+        elif method == 'mean':
+            best_fit = {label: np.mean(samples[:, i]) for i, label in enumerate(param_labels) if i < samples.shape[1]}
+        elif method == 'max_likelihood':
+            # Find sample with maximum likelihood
+            log_probs = sampler.get_log_prob(discard=burnin, thin=thin, flat=True)
+            best_idx = np.argmax(log_probs)
+            best_fit = {label: samples[best_idx, i] for i, label in enumerate(param_labels) if i < samples.shape[1]}
+        else:
+            raise ValueError("method must be 'median', 'mean', or 'max_likelihood'")
+            
+        return best_fit
