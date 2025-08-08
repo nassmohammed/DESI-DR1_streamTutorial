@@ -1974,6 +1974,7 @@ class MCMeta:
             "bv", "lsigbv", "bfeh", "lsigbfeh", "bpmra", "lsigbpmra", "bpmdec", "lsigbpmdec"
         ]
 
+
         # Initialize the initial_params dictionary
         self.initial_params = {}
 
@@ -2016,250 +2017,96 @@ class MCMeta:
         self.initial_params['bpmdec'] = np.mean(np.array(self.stream.data.desi_data['PMDEC']))
         self.initial_params['lsigbpmdec'] = np.log10(np.std(np.array(self.stream.data.desi_data['PMDEC'])))
         print(f"Background PMDEC: {self.initial_params['bpmdec']:.2f} +- {10**self.initial_params['lsigbpmdec']:.2f} mas/yr")
+    
+    def priors(self, prior_arr):
+        self.prior_arr = prior_arr
 
-    def create_plotter(self, save_dir='plots/'):
-        """
-        Create a StreamPlotter object initialized with this MCMeta instance.
+        self.p0_guess = [
+        0.1,                                                 # pstream (constant stream fraction)
+        self.initial_params['vgsr_spline_points'],         # VGSR spline points
+        self.initial_params['lsigvgsr'],                   # lsigvgsr (constant log velocity dispersion)
+        self.initial_params['feh1'],                       # mean [Fe/H]
+        self.initial_params['lsigfeh'],                    # log(sigma_[Fe/H])
+        self.initial_params['pmra_spline_points'],         # PMRA spline points
+        self.initial_params['lsigpmra'],                   # log(sigma_pmra)
+        self.initial_params['pmdec_spline_points'],        # PMDEC spline points
+        self.initial_params['lsigpmdec'],                  # log(sigma_pmdec)
+        self.initial_params['bv'],                         # background VGSR
+        self.initial_params['lsigbv'],                     # log(sigma_background_vgsr)
+        self.initial_params['bfeh'],                       # background [Fe/H]
+        self.initial_params['lsigbfeh'],                   # log(sigma_background_feh)
+        self.initial_params['bpmra'],                      # background PMRA
+        self.initial_params['lsigbpmra'],                  # log(sigma_background_pmra)
+        self.initial_params['bpmdec'],                     # background PMDEC
+        self.initial_params['lsigbpmdec']                  # log(sigma_background_pmdec)
+    ]
         
-        Returns:
-            StreamPlotter: A plotter object that can access both stream and MCMeta functionality.
-        """
-        return StreamPlotter(self, save_dir=save_dir)
+        self.vgsr_trunc = [self.truncation_params['vgsr_min'], self.truncation_params['vgsr_max']]
+        self.feh_trunc = [self.truncation_params['feh_min'], self.truncation_params['feh_max']]  
+        self.pmra_trunc = [self.truncation_params['pmra_min'], self.truncation_params['pmra_max']]
+        self.pmdec_trunc = [self.truncation_params['pmdec_min'], self.truncation_params['pmdec_max']]
 
-    def plot_chains(self, sampler, param_labels, save=False, burnin=0, thin=1, figsize=(12, 8)):
-        """
-        Plot MCMC chains for all parameters to check convergence
-        
-        Parameters:
-        -----------
-        sampler : emcee.EnsembleSampler
-            The emcee sampler object from MCMC run
-        param_labels : list
-            List of parameter names for labeling
-        save : bool, optional
-            Whether to save the plot. Default is False.
-        burnin : int, optional
-            Number of burn-in samples to discard. Default is 0.
-        thin : int, optional
-            Thin the chain by this factor. Default is 1.
-        figsize : tuple, optional
-            Figure size. Default is (12, 8).
-            
-        Returns:
-        --------
-        fig, axes : matplotlib figure and axes
-            The plot figure and axes
-        """
-        # Get the chain
-        samples = sampler.get_chain(discard=burnin, thin=thin)
-        nwalkers, nsteps, ndim = samples.shape
-        
-        # Create subplots
-        ncols = 3
-        nrows = int(np.ceil(ndim / ncols))
-        fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
-        
-        # Handle different subplot configurations
-        if nrows == 1 and ncols == 1:
-            axes = [axes]
-        elif nrows == 1 or ncols == 1:
-            axes = axes.flatten()
-        else:
-            axes = axes.flatten()
-        
-        # Plot each parameter
-        for i in range(ndim):
-            ax = axes[i]
-            
-            # Plot all walker chains
-            for j in range(nwalkers):
-                ax.plot(samples[j, :, i], alpha=0.3, color='k', lw=0.5)
-            
-            # Set labels
-            param_name = param_labels[i] if i < len(param_labels) else f'param_{i}'
-            ax.set_title(param_name, fontsize=10)
-            ax.set_xlabel('Step')
-            ax.set_ylabel('Value')
-            stream_funcs.plot_form(ax)
-        
-        # Hide unused subplots
-        for i in range(ndim, len(axes)):
-            axes[i].set_visible(False)
-            
-        plt.tight_layout()
-        
-        if save:
-            save_dir = 'plots/'
-            if not os.path.exists(save_dir):
-                os.makedirs(save_dir)
-            plt.savefig(f"{save_dir}mcmc_chains_{self.stream.streamName}.png", 
-                       dpi=300, bbox_inches='tight')
-        
-        return fig, axes
+        self.array_lengths = [len(x) if isinstance(x, np.ndarray) else 1 for x in self.p0_guess]
+        self.flat_p0_guess = np.hstack(self.p0_guess) 
 
-    def plot_corner(self, sampler, param_labels, save=False, burnin=0, thin=1, truths=None, 
-                   show_titles=True, title_fmt=".3f", quantiles=[0.16, 0.5, 0.84]):
-        """
-        Create a corner plot of the MCMC posterior distributions
-        
-        Parameters:
-        -----------
-        sampler : emcee.EnsembleSampler
-            The emcee sampler object from MCMC run
-        param_labels : list
-            List of parameter names for labeling
-        save : bool, optional
-            Whether to save the plot. Default is False.
-        burnin : int, optional
-            Number of burn-in samples to discard. Default is 0.
-        thin : int, optional
-            Thin the chain by this factor. Default is 1.
-        truths : array_like, optional
-            True parameter values to overplot. Default is None.
-        show_titles : bool, optional
-            Whether to show parameter value titles. Default is True.
-        title_fmt : str, optional
-            Format string for parameter titles. Default is ".3f".
-        quantiles : list, optional
-            Quantiles to show in histograms. Default is [0.16, 0.5, 0.84].
-            
-        Returns:
-        --------
-        fig : matplotlib figure
-            The corner plot figure
-        """
-        # Get the flattened chain
-        samples = sampler.get_chain(discard=burnin, thin=thin, flat=True)
-        
-        # Create the corner plot
-        fig = corner.corner(
-            samples, 
-            labels=param_labels,
-            truths=truths,
-            show_titles=show_titles,
-            title_fmt=title_fmt,
-            quantiles=quantiles,
-            plot_datapoints=False,
-            fill_contours=True,
-            levels=(0.68, 0.95),
-            color='blue',
-            hist_kwargs={'density': True}
-        )
-        
-        if save:
-            save_dir = 'plots/'
-            if not os.path.exists(save_dir):
-                os.makedirs(save_dir)
-            plt.savefig(f"{save_dir}corner_plot_{self.stream.streamName}.png", 
-                       dpi=300, bbox_inches='tight')
-        
-        return fig
+    def scipy_optimize(self):
+        self.param_labels = ['pstream', 'vgsr_spline_points', 'lsigvgsr', 'feh1', 'lsigfeh', 
+            'pmra_spline_points', 'lsigpmra', 'pmdec_spline_points', 'lsigpmdec',
+                'bv', 'lsigbv', 'bfeh', 'lsigbfeh', 'bpmra', 'lsigbpmra', 'bpmdec', 'lsigbpmdec']
+        optfunc = lambda theta: -stream_funcs.spline_lnprob_1D(
+            theta, self.prior_arr, self.phi1_spline_points,  # Only phi1_spline_points needed
+            self.stream.data.desi_data['VGSR'], self.stream.data.desi_data['VRAD_ERR'],
+            self.stream.data.desi_data['FEH'], self.stream.data.desi_data['FEH_ERR'],
+            self.stream.data.desi_data['PMRA'], self.stream.data.desi_data['PMRA_ERROR'],
+            self.stream.data.desi_data['PMDEC'], self.stream.data.desi_data['PMDEC_ERROR'],
+            self.stream.data.desi_data['phi1'], 
+            trunc_fit=True, feh_fit=True, assert_prior=False, k=self.spline_k, 
+            reshape_arr_shape=self.array_lengths,
+            vgsr_trunc=self.vgsr_trunc, feh_trunc=self.feh_trunc, 
+            pmra_trunc=self.pmra_trunc, pmdec_trunc=self.pmdec_trunc
+)
+    # Run optimization
+        print("Running optimization...")
+        self.sp_result = sp.optimize.minimize(optfunc, self.flat_p0_guess, method="Nelder-Mead")
+        print(self.sp_result.message)
 
-    def get_parameter_summary(self, sampler, param_labels, burnin=0, thin=1, percentiles=[16, 50, 84]):
-        """
-        Get summary statistics for MCMC parameters
-        
-        Parameters:
-        -----------
-        sampler : emcee.EnsembleSampler
-            The emcee sampler object from MCMC run
-        param_labels : list
-            List of parameter names
-        burnin : int, optional
-            Number of burn-in samples to discard. Default is 0.
-        thin : int, optional
-            Thin the chain by this factor. Default is 1.
-        percentiles : list, optional
-            Percentiles to compute. Default is [16, 50, 84] for median and 1-sigma.
-            
-        Returns:
-        --------
-        dict : parameter summary
-            Dictionary with parameter names as keys and [lower, median, upper] as values
-        """
-        # Get the flattened chain
-        samples = sampler.get_chain(discard=burnin, thin=thin, flat=True)
-        
-        summary = {}
-        for i, label in enumerate(param_labels):
-            if i < samples.shape[1]:
-                percentile_values = np.percentile(samples[:, i], percentiles)
-                summary[label] = {
-                    'lower': percentile_values[0],
-                    'median': percentile_values[1], 
-                    'upper': percentile_values[2],
-                    'mean': np.mean(samples[:, i]),
-                    'std': np.std(samples[:, i])
-                }
-            
-        return summary
+        self.reshaped_result = stream_funcs.reshape_arr(self.sp_result.x, self.array_lengths)
+        self.sp_output = stream_funcs.get_paramdict(self.reshaped_result, labels=self.param_labels)
 
-    def print_parameter_summary(self, sampler, param_labels, burnin=0, thin=1):
-        """
-        Print a formatted summary of MCMC parameter results
-        
-        Parameters:
-        -----------
-        sampler : emcee.EnsembleSampler
-            The emcee sampler object from MCMC run
-        param_labels : list
-            List of parameter names
-        burnin : int, optional
-            Number of burn-in samples to discard. Default is 0.
-        thin : int, optional
-            Thin the chain by this factor. Default is 1.
-        """
-        summary = self.get_parameter_summary(sampler, param_labels, burnin=burnin, thin=thin)
-        
-        print("\nMCMC Parameter Summary:")
-        print("=" * 60)
-        print(f"{'Parameter':<20} {'Median':<12} {'Lower':<12} {'Upper':<12}")
-        print("-" * 60)
-        
-        for param, stats in summary.items():
-            median = stats['median']
-            lower_err = stats['median'] - stats['lower']
-            upper_err = stats['upper'] - stats['median']
-            
-            print(f"{param:<20} {median:>11.4f} -{lower_err:>10.4f} +{upper_err:>10.4f}")
-            
-        print("=" * 60)
+        print("\nOptimized Parameters:")
+        for label, value in self.sp_output.items():
+            if label.startswith('l'):
+                if isinstance(value, np.ndarray):
+                    print(f"{label[1:]}: {10**value}")
+                else:
+                    print(f"{label[1:]}: {10**value:.4f}")
+            else:
+                if isinstance(value, np.ndarray):
+                    print(f"{label}: {value}")
+                else:
+                    print(f"{label}: {value:.4f}" if isinstance(value, (int, float)) else f"{label}: {value}")
 
-    def get_best_fit_parameters(self, sampler, param_labels, burnin=0, thin=1, method='median'):
-        """
-        Get the best-fit parameters from MCMC chain
-        
-        Parameters:
-        -----------
-        sampler : emcee.EnsembleSampler
-            The emcee sampler object from MCMC run
-        param_labels : list
-            List of parameter names
-        burnin : int, optional
-            Number of burn-in samples to discard. Default is 0.
-        thin : int, optional
-            Thin the chain by this factor. Default is 1.
-        method : str, optional
-            Method to determine best-fit: 'median', 'mean', or 'max_likelihood'. Default is 'median'.
-            
-        Returns:
-        --------
-        dict : best-fit parameters
-            Dictionary with parameter names as keys and best-fit values
-        """
-        # Get the flattened chain
-        samples = sampler.get_chain(discard=burnin, thin=thin, flat=True)
-        
-        if method == 'median':
-            best_fit = {label: np.median(samples[:, i]) for i, label in enumerate(param_labels) if i < samples.shape[1]}
-        elif method == 'mean':
-            best_fit = {label: np.mean(samples[:, i]) for i, label in enumerate(param_labels) if i < samples.shape[1]}
-        elif method == 'max_likelihood':
-            # Find sample with maximum likelihood
-            log_probs = sampler.get_log_prob(discard=burnin, thin=thin, flat=True)
-            best_idx = np.argmax(log_probs)
-            best_fit = {label: samples[best_idx, i] for i, label in enumerate(param_labels) if i < samples.shape[1]}
-        else:
-            raise ValueError("method must be 'median', 'mean', or 'max_likelihood'")
-            
-        return best_fit
+
+
+
+    
+
+class MCMC:
+    """
+    For running MCMC and intial outputs
+    """
+    def __init__(self, MCMeta_object, output_dir=''):
+        self.meta = MCMeta_object
+        self.stream = self.meta.stream
+        self.output_dir = output_dir
+        self.backend = emcee.backends.HDFBackend(self.output_dir+'/'+self.stream.streamName+str(self.meta.no_of_spline_points)+'.h5')
+    #WIP
+    # def runMCMC(self, nproc, nburnin, nstep, use_optimized_start=True):
+    #     if use_optimized_start:
+    #     print("Using optimized parameters as starting positions...")
+    #     start_params = result.x
+    #     start_label = "optimized"
+    # else:
+    #     print("Using initial guess as starting positions...")
+    #     start_params = flat_p0_guess
+    #     start_label = "initial_guess"
