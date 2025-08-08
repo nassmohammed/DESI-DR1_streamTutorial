@@ -458,6 +458,7 @@ class stream:
         Placeholder for isochrone fitting logic.
         """
         mass_fraction = 0.0181 * 10 ** metallicity
+        print(f'Mass Fraction (Z): {mass_fraction}')
 
         dotter_mass_frac = np.array([
         0.00006, 0.00007, 0.00009, 0.00010, 0.00011, 0.00013, 0.00014, 0.00016,
@@ -473,11 +474,14 @@ class stream:
         "0.00144", "0.00166", "0.00189", "0.00213", "0.00242", "0.00276", "0.00316", "0.00363",
         "0.00417"
     ]
-        use_mass_frac = dotter_mass_frac_str[np.argmin(dotter_mass_frac - mass_fraction)]
+        print('')
+        use_mass_frac = dotter_mass_frac_str[np.argmin(np.abs(dotter_mass_frac - mass_fraction))]
+
 
         isochrone_path = dotter_directory + 'iso_a' + str(age) + '_z' + str(use_mass_frac) + '.dat'
         print(f'using {isochrone_path}')
         dotter_mp = np.loadtxt(isochrone_path)
+        self.isochrone_path = isochrone_path
 
         # Obtain the M_g and M_r color band data
         self.dotter_g_mp = dotter_mp[:,6]
@@ -1395,7 +1399,7 @@ class StreamPlotter:
         ax[4].set_ylim(-4, -0.5)
         
         # Plot splines if requested and available
-        if (show_initial_splines or show_optimized_splines) and stream_frame and self.mcmeta is not None:
+        if (show_initial_splines or show_optimized_splines or show_mcmc_splines) and stream_frame and self.mcmeta is not None:
             # Create phi1 range for spline plotting
             phi1_min = ax[1].get_xlim()[0]
             phi1_max = ax[1].get_xlim()[1]
@@ -1413,6 +1417,12 @@ class StreamPlotter:
                         ax[1].plot(phi1_spline_plot, vgsr_initial, 'k-', linewidth=2, 
                                   label='Initial Spline', alpha=0.8)
                         
+                        # Add circle markers at spline points
+                        ax[1].scatter(self.mcmeta.phi1_spline_points, 
+                                     self.mcmeta.initial_params['vgsr_spline_points'],
+                                     marker='o', color='black', s=50, zorder=10, alpha=0.8,
+                                     edgecolors='white', linewidth=1)
+                        
                         # PMRA spline
                         pmra_initial = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
@@ -1420,6 +1430,12 @@ class StreamPlotter:
                         )
                         ax[2].plot(phi1_spline_plot, pmra_initial, 'k-', linewidth=2, 
                                   label='Initial Spline', alpha=0.8)
+                        
+                        # Add circle markers at spline points
+                        ax[2].scatter(self.mcmeta.phi1_spline_points, 
+                                     self.mcmeta.initial_params['pmra_spline_points'],
+                                     marker='o', color='black', s=50, zorder=10, alpha=0.8,
+                                     edgecolors='white', linewidth=1)
                         
                         # PMDEC spline
                         pmdec_initial = stream_funcs.apply_spline(
@@ -1429,10 +1445,22 @@ class StreamPlotter:
                         ax[3].plot(phi1_spline_plot, pmdec_initial, 'k-', linewidth=2, 
                                   label='Initial Spline', alpha=0.8)
                         
+                        # Add circle markers at spline points
+                        ax[3].scatter(self.mcmeta.phi1_spline_points, 
+                                     self.mcmeta.initial_params['pmdec_spline_points'],
+                                     marker='o', color='black', s=50, zorder=10, alpha=0.8,
+                                     edgecolors='white', linewidth=1)
+                        
                         # FEH constant line
                         feh_initial = np.full_like(phi1_spline_plot, self.mcmeta.initial_params['feh1'])
                         ax[4].plot(phi1_spline_plot, feh_initial, 'k-', linewidth=2, 
                                   label='Initial [Fe/H]', alpha=0.8)
+                        
+                        # Add circle markers at spline points for FEH (constant value)
+                        ax[4].scatter(self.mcmeta.phi1_spline_points, 
+                                     np.full_like(self.mcmeta.phi1_spline_points, self.mcmeta.initial_params['feh1']),
+                                     marker='o', color='black', s=50, zorder=10, alpha=0.8,
+                                     edgecolors='white', linewidth=1)
                     except Exception as e:
                         print(f"Warning: Could not plot initial splines: {e}")
             
@@ -1448,6 +1476,12 @@ class StreamPlotter:
                         ax[1].plot(phi1_spline_plot, vgsr_optimized, 'r-', linewidth=2, 
                                   label='Optimized Spline', alpha=0.8)
                         
+                        # Add circle markers at spline points
+                        ax[1].scatter(self.mcmeta.phi1_spline_points, 
+                                     self.mcmeta.optimized_params['vgsr_spline_points'],
+                                     marker='o', color='red', s=50, zorder=10, alpha=0.8,
+                                     edgecolors='white', linewidth=1)
+                        
                         # PMRA spline
                         pmra_optimized = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
@@ -1455,6 +1489,12 @@ class StreamPlotter:
                         )
                         ax[2].plot(phi1_spline_plot, pmra_optimized, 'r-', linewidth=2, 
                                   label='Optimized Spline', alpha=0.8)
+                        
+                        # Add circle markers at spline points
+                        ax[2].scatter(self.mcmeta.phi1_spline_points, 
+                                     self.mcmeta.optimized_params['pmra_spline_points'],
+                                     marker='o', color='red', s=50, zorder=10, alpha=0.8,
+                                     edgecolors='white', linewidth=1)
                         
                         # PMDEC spline
                         pmdec_optimized = stream_funcs.apply_spline(
@@ -1464,10 +1504,22 @@ class StreamPlotter:
                         ax[3].plot(phi1_spline_plot, pmdec_optimized, 'r-', linewidth=2, 
                                   label='Optimized Spline', alpha=0.8)
                         
+                        # Add circle markers at spline points
+                        ax[3].scatter(self.mcmeta.phi1_spline_points, 
+                                     self.mcmeta.optimized_params['pmdec_spline_points'],
+                                     marker='o', color='red', s=50, zorder=10, alpha=0.8,
+                                     edgecolors='white', linewidth=1)
+                        
                         # FEH constant line
                         feh_optimized = np.full_like(phi1_spline_plot, self.mcmeta.optimized_params['feh1'])
                         ax[4].plot(phi1_spline_plot, feh_optimized, 'r-', linewidth=2, 
                                   label='Optimized [Fe/H]', alpha=0.8)
+                        
+                        # Add circle markers at spline points for FEH (constant value)
+                        ax[4].scatter(self.mcmeta.phi1_spline_points, 
+                                     np.full_like(self.mcmeta.phi1_spline_points, self.mcmeta.optimized_params['feh1']),
+                                     marker='o', color='red', s=50, zorder=10, alpha=0.8,
+                                     edgecolors='white', linewidth=1)
                     except Exception as e:
                         print(f"Warning: Could not plot optimized splines: {e}")
             
@@ -1525,6 +1577,33 @@ class StreamPlotter:
                         ax[1].plot(phi1_spline_plot, vgsr_mcmc, 'b-', linewidth=2, 
                                   label='MCMC Spline', alpha=0.8)
                         
+                        # Extract error bars for VGSR spline points
+                        try:
+                            # Get error estimates - look for ep/em variables in calling context
+                            vgsr_mcmc_errors = []
+                            for i in range(1, no_of_spline_points + 1):
+                                if f'vgsr{i}' in caller_frame.f_globals.get('ep', {}) and f'vgsr{i}' in caller_frame.f_globals.get('em', {}):
+                                    ep_val = caller_frame.f_globals['ep'][f'vgsr{i}']
+                                    em_val = caller_frame.f_globals['em'][f'vgsr{i}']
+                                    vgsr_mcmc_errors.append([em_val, ep_val])
+                                elif f'vgsr{i}' in caller_frame.f_locals.get('ep', {}) and f'vgsr{i}' in caller_frame.f_locals.get('em', {}):
+                                    ep_val = caller_frame.f_locals['ep'][f'vgsr{i}']
+                                    em_val = caller_frame.f_locals['em'][f'vgsr{i}']
+                                    vgsr_mcmc_errors.append([em_val, ep_val])
+                                else:
+                                    vgsr_mcmc_errors.append([0, 0])
+                            
+                            vgsr_mcmc_errors = np.array(vgsr_mcmc_errors).T
+                            ax[1].errorbar(self.mcmeta.phi1_spline_points, vgsr_mcmc_points, 
+                                          yerr=vgsr_mcmc_errors, fmt='o', color='blue', 
+                                          markersize=8, zorder=10, alpha=0.8, markeredgecolor='white', 
+                                          markeredgewidth=1, capsize=3, capthick=1.5, elinewidth=1.5)
+                        except:
+                            # Fallback to simple markers without error bars
+                            ax[1].scatter(self.mcmeta.phi1_spline_points, vgsr_mcmc_points,
+                                         marker='o', color='blue', s=50, zorder=10, alpha=0.8,
+                                         edgecolors='white', linewidth=1)
+                        
                         # PMRA spline
                         pmra_mcmc = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
@@ -1532,6 +1611,32 @@ class StreamPlotter:
                         )
                         ax[2].plot(phi1_spline_plot, pmra_mcmc, 'b-', linewidth=2, 
                                   label='MCMC Spline', alpha=0.8)
+                        
+                        # Extract error bars for PMRA spline points
+                        try:
+                            pmra_mcmc_errors = []
+                            for i in range(1, no_of_spline_points + 1):
+                                if f'pmra{i}' in caller_frame.f_globals.get('ep', {}) and f'pmra{i}' in caller_frame.f_globals.get('em', {}):
+                                    ep_val = caller_frame.f_globals['ep'][f'pmra{i}']
+                                    em_val = caller_frame.f_globals['em'][f'pmra{i}']
+                                    pmra_mcmc_errors.append([em_val, ep_val])
+                                elif f'pmra{i}' in caller_frame.f_locals.get('ep', {}) and f'pmra{i}' in caller_frame.f_locals.get('em', {}):
+                                    ep_val = caller_frame.f_locals['ep'][f'pmra{i}']
+                                    em_val = caller_frame.f_locals['em'][f'pmra{i}']
+                                    pmra_mcmc_errors.append([em_val, ep_val])
+                                else:
+                                    pmra_mcmc_errors.append([0, 0])
+                            
+                            pmra_mcmc_errors = np.array(pmra_mcmc_errors).T
+                            ax[2].errorbar(self.mcmeta.phi1_spline_points, pmra_mcmc_points, 
+                                          yerr=pmra_mcmc_errors, fmt='o', color='blue', 
+                                          markersize=8, zorder=10, alpha=0.8, markeredgecolor='white', 
+                                          markeredgewidth=1, capsize=3, capthick=1.5, elinewidth=1.5)
+                        except:
+                            # Fallback to simple markers without error bars
+                            ax[2].scatter(self.mcmeta.phi1_spline_points, pmra_mcmc_points,
+                                         marker='o', color='blue', s=50, zorder=10, alpha=0.8,
+                                         edgecolors='white', linewidth=1)
                         
                         # PMDEC spline
                         pmdec_mcmc = stream_funcs.apply_spline(
@@ -1541,10 +1646,63 @@ class StreamPlotter:
                         ax[3].plot(phi1_spline_plot, pmdec_mcmc, 'b-', linewidth=2, 
                                   label='MCMC Spline', alpha=0.8)
                         
+                        # Extract error bars for PMDEC spline points
+                        try:
+                            pmdec_mcmc_errors = []
+                            for i in range(1, no_of_spline_points + 1):
+                                if f'pmdec{i}' in caller_frame.f_globals.get('ep', {}) and f'pmdec{i}' in caller_frame.f_globals.get('em', {}):
+                                    ep_val = caller_frame.f_globals['ep'][f'pmdec{i}']
+                                    em_val = caller_frame.f_globals['em'][f'pmdec{i}']
+                                    pmdec_mcmc_errors.append([em_val, ep_val])
+                                elif f'pmdec{i}' in caller_frame.f_locals.get('ep', {}) and f'pmdec{i}' in caller_frame.f_locals.get('em', {}):
+                                    ep_val = caller_frame.f_locals['ep'][f'pmdec{i}']
+                                    em_val = caller_frame.f_locals['em'][f'pmdec{i}']
+                                    pmdec_mcmc_errors.append([em_val, ep_val])
+                                else:
+                                    pmdec_mcmc_errors.append([0, 0])
+                            
+                            pmdec_mcmc_errors = np.array(pmdec_mcmc_errors).T
+                            ax[3].errorbar(self.mcmeta.phi1_spline_points, pmdec_mcmc_points, 
+                                          yerr=pmdec_mcmc_errors, fmt='o', color='blue', 
+                                          markersize=8, zorder=10, alpha=0.8, markeredgecolor='white', 
+                                          markeredgewidth=1, capsize=3, capthick=1.5, elinewidth=1.5)
+                        except:
+                            # Fallback to simple markers without error bars
+                            ax[3].scatter(self.mcmeta.phi1_spline_points, pmdec_mcmc_points,
+                                         marker='o', color='blue', s=50, zorder=10, alpha=0.8,
+                                         edgecolors='white', linewidth=1)
+                        
                         # FEH constant line
                         feh_mcmc = np.full_like(phi1_spline_plot, meds['feh1'])
                         ax[4].plot(phi1_spline_plot, feh_mcmc, 'b-', linewidth=2, 
                                   label='MCMC [Fe/H]', alpha=0.8)
+                        
+                        # Extract error bars for FEH (constant value)
+                        try:
+                            if 'feh1' in caller_frame.f_globals.get('ep', {}) and 'feh1' in caller_frame.f_globals.get('em', {}):
+                                feh_ep = caller_frame.f_globals['ep']['feh1']
+                                feh_em = caller_frame.f_globals['em']['feh1']
+                                feh_yerr = [[feh_em] * len(self.mcmeta.phi1_spline_points), 
+                                           [feh_ep] * len(self.mcmeta.phi1_spline_points)]
+                            elif 'feh1' in caller_frame.f_locals.get('ep', {}) and 'feh1' in caller_frame.f_locals.get('em', {}):
+                                feh_ep = caller_frame.f_locals['ep']['feh1']
+                                feh_em = caller_frame.f_locals['em']['feh1']
+                                feh_yerr = [[feh_em] * len(self.mcmeta.phi1_spline_points), 
+                                           [feh_ep] * len(self.mcmeta.phi1_spline_points)]
+                            else:
+                                raise KeyError("FEH errors not found")
+                            
+                            ax[4].errorbar(self.mcmeta.phi1_spline_points, 
+                                          np.full_like(self.mcmeta.phi1_spline_points, meds['feh1']), 
+                                          yerr=feh_yerr, fmt='o', color='blue', 
+                                          markersize=8, zorder=10, alpha=0.8, markeredgecolor='white', 
+                                          markeredgewidth=1, capsize=3, capthick=1.5, elinewidth=1.5)
+                        except:
+                            # Fallback to simple markers without error bars
+                            ax[4].scatter(self.mcmeta.phi1_spline_points, 
+                                         np.full_like(self.mcmeta.phi1_spline_points, meds['feh1']),
+                                         marker='o', color='blue', s=50, zorder=10, alpha=0.8,
+                                         edgecolors='white', linewidth=1)
                                   
                     finally:
                         del frame
@@ -1789,7 +1947,7 @@ class MCMeta:
         else:
             self.spline_k = self.no_of_spline_points - 1
 
-        self.phi1_spline_points = np.linspace(self.stream.data.SoI_streamfinder['phi1'].min()-5, self.stream.data.SoI_streamfinder['phi1'].max()+5, self.no_of_spline_points)
+        self.phi1_spline_points = np.linspace(self.stream.data.SoI_streamfinder['phi1'].min(), self.stream.data.SoI_streamfinder['phi1'].max(), self.no_of_spline_points)
 
         # Store truncation parameters for plotting
         if truncation_params is None:
