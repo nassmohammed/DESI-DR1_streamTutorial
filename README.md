@@ -1,8 +1,80 @@
 # DESI DR1 Stellar Catalogue Stream Tutorial
 The tutorial notebook (`streamTutorial.ipynb`) will walk users through loading DESI Milky Way Survey data to look for new members of known stellar streams.
 
+## Background
+### Stellar Streams
+Milky Way-like galaxies evolved hierarchically, accreeting mass through many mergers within a **dark matter** (DM) halo. Stellar streams are a result of this process; a host galaxy's potential disrupts satellites (dwarf galaxies, globular clusters) leading them to form tidal tails.
 
-## Download DESI DR1 Stellar Catalogue
+<img src="img_examples/s5_streamart.png" alt="alt text" width="400"> 
+
+[Artist depiction of stellar streams in orbit around host galaxy | from S5 Collaboration]
+
+Theories of cold and alternative DM *disagree* on predictions at the sub-galactic scale. Stellar streams offer a powerful means to indirectly constrain the DM substructure within the Milky Way. 
+
+However, to do this we need robust membership counts for stellar streams within our Galaxy. There are multiple ways to approach characterizing streams, but in this tutorial you will be walked through using **finite mixture models** to disentagle stellar streams from surrounding stars.
+
+### Mixture Modelling
+
+Mixture models are powerful statistical to describe a set of datapoints that come from different distinct populations, even if we can't directly observe which data points belongs tow hich group.
+
+In this tutorial, we will assume that the field of stars we narrow in on can be described by two distnict gaussian populations: one for the stream, and one for the 'background' (non-stream stars).
+
+<img src="img_examples/sylgr_tGMM_ex.png" alt="alt text" width="500">
+
+[Example truncated-Gaussain Mixture Model]
+
+
+### MCMC
+We have to fit for the best mixture of models, and to do that we use Bayesian statistics. 
+$$P(\theta|D) = \frac{\mathcal{L}(D|\theta) \cdot P(\theta)}{P(D)}$$
+
+Where $\mathcal{L}(D|\theta)$ is the likelihood function, $P(\theta)$ is the prior probability, and $P(D)$ is the evidence, with $\theta$ representing our model parameters and $D$ the observed data.
+
+In natural language, Bayes' theorem reads as:
+
+> The probability of our model parameters given our observed data is equal to the likelihood of the data given the model parameters multiplied by the prior probability of the model parameters, divided by the probability of the data.
+
+In practice, we can mostly ignore the evidence term ($P(D)$) since it is a constant. 
+
+
+To find the best-fitting parameters, we need to sample from the posterior distribution $P(\theta|D)$. This is where **Markov Chain Monte Carlo (MCMC)** comes in.
+
+For mixture models, MCMC allows us to simultaneously fit:
+- Stream population parameters (mean position, velocity dispersion, metallicity)
+- Background population parameters
+- Membership probabilities for each star
+
+The chain explores regions of parameter space with higher posterior probability more frequently, giving us both best-fit values and uncertainty estimates.
+
+
+
+
+
+
+## Get Started
+### Clone this repository
+
+Run the following terminal command in the directory you'll be working in.
+
+```shell
+git clone https://github.com/nassmohammed/DESI-DR1_streamTutorial.git
+```
+
+Included is
+- `data/` - directory including small data files needed for this tutorial
+  - `dotter/` - Stellar evolution models from Dotter et al. XXXX
+  - `sf3_only_table.csv` - overview table of STREAMFINDER streams
+  - `streamfinder_gaiadr3.fits` - file including stars in STREAMFINDER streams
+- `stream_examples/` - directory including .html files from succesfully run notebook. This is your cheatsheet, only use if you're truly stuck!
+- `*.py` - scripts powering the tutorial
+- `streamTutorial.ipynb` - the main notebook you will be working with.
+- `env.yml` - the file to setup the required python and package versions for this tutorail.
+
+**Not included**
+- `mwsall-pix-iron.fits` - [12 GB] DESI DR1 Stellar Catalogue data. See below how to download
+
+
+### Download DESI DR1 Stellar Catalogue
 You can download from  here (https://data.desi.lbl.gov/public/dr1/vac/dr1/mws/iron/v1.0/mwsall-pix-iron.fits) or from your terminal with:
 
 ```ssh
@@ -11,7 +83,15 @@ curl -o .mwsall-pix-iron.fits https://data.desi.lbl.gov/public/dr1/vac/dr1/mws/i
 
 Read [here](https://data.desi.lbl.gov/doc/releases/dr1/vac/mws/) for a general overview of the DESI DR1 stellar catalogue. The corresponding paper (Kosposov et al. 2025) can be found [here](https://ui.adsabs.harvard.edu/abs/2025arXiv250514787K/abstract).
 
+If space is a concern for your device, contact `ting [dot] li [at] astro [dot] utoronto [dot] ca` to get set up on the Eridanus server (Only for participants at the 2025 EXPLORE summer school and research workshop at York University).
 
+### Install Python Environment
+In your cloned directory, run the following in your terminal:
+```shell
+conda env create -f env.yml 
+```
+This will set up the proper python environment to run this notebook.
 
 ## User tips & FAQ
+W.I.P.
 
