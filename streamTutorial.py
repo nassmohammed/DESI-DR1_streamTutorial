@@ -1201,6 +1201,54 @@ class StreamPlotter:
                 **self.plot_params['background']
             )
         
+        # Determine unified x-limits for all subplots
+        x_min, x_max = None, None
+        pad_deg = 1.0  # small padding in degrees around spline point range
+        try:
+            # Prefer spline point range when any spline overlay is toggled on (and we're in stream frame)
+            if stream_frame and self.mcmeta is not None and \
+               (show_initial_splines or show_optimized_splines or show_mcmc_splines) and \
+               hasattr(self.mcmeta, 'phi1_spline_points'):
+                spline_pts = np.array(self.mcmeta.phi1_spline_points)
+                if spline_pts.size > 0 and np.all(np.isfinite(spline_pts)):
+                    x_min = float(np.nanmin(spline_pts)) - pad_deg
+                    x_max = float(np.nanmax(spline_pts)) + pad_deg
+
+            # Fallback to the data range displayed
+            if x_min is None or x_max is None or not np.isfinite(x_min) or not np.isfinite(x_max):
+                x_arrays = []
+                if showStream and hasattr(self.data, 'confirmed_sf_and_desi') and len(self.data.confirmed_sf_and_desi) > 0:
+                    x_arrays.append(np.asarray(self.data.confirmed_sf_and_desi[col_x]))
+                if show_cut and hasattr(self.data, 'cut_confirmed_sf_and_desi') and len(self.data.cut_confirmed_sf_and_desi) > 0:
+                    x_arrays.append(np.asarray(self.data.cut_confirmed_sf_and_desi[col_x]))
+                if show_sf_only and hasattr(self.data, 'confirmed_sf_not_desi') and len(self.data.confirmed_sf_not_desi) > 0:
+                    x_arrays.append(np.asarray(self.data.confirmed_sf_not_desi[col_x_]))
+                if background and hasattr(self.data, 'desi_data') and len(self.data.desi_data) > 0:
+                    x_arrays.append(np.asarray(self.data.desi_data[col_x]))
+
+                if len(x_arrays) > 0:
+                    x_concat = np.concatenate([arr[np.isfinite(arr)] for arr in x_arrays if arr is not None])
+                    if x_concat.size > 0:
+                        x_min = float(np.nanmin(x_concat))
+                        x_max = float(np.nanmax(x_concat))
+
+            # Final fallback to current axis limits if everything else fails
+            if x_min is None or x_max is None or not np.isfinite(x_min) or not np.isfinite(x_max):
+                cur_xlim = ax[0].get_xlim()
+                x_min, x_max = float(cur_xlim[0]), float(cur_xlim[1])
+        except Exception as e:
+            # In case of unexpected issues, keep current limits
+            cur_xlim = ax[0].get_xlim()
+            x_min, x_max = float(cur_xlim[0]), float(cur_xlim[1])
+
+        # Guard against zero-width ranges
+        if np.isfinite(x_min) and np.isfinite(x_max):
+            if x_max <= x_min:
+                x_max = x_min + 1e-6
+            # Apply unified x-limits to all subplots
+            for a in ax:
+                a.set_xlim(x_min, x_max)
+        
         # Plot membership probability stars if requested
         if show_membership_prob and stream_prob is not None:
             import matplotlib.cm as cm
@@ -1375,7 +1423,7 @@ class StreamPlotter:
                         **sf_diamond_params_low
                     )
 
-        # Set y-axis limits based on stream data if available
+    # Set y-axis limits based on stream data if available
         if showStream and hasattr(self.data, 'confirmed_sf_and_desi') and len(self.data.confirmed_sf_and_desi) > 0:
             # VGSR limits
             vgsr_data = [self.data.confirmed_sf_and_desi['VGSR']]
@@ -1401,8 +1449,13 @@ class StreamPlotter:
         # Plot splines if requested and available
         if (show_initial_splines or show_optimized_splines or show_mcmc_splines) and stream_frame and self.mcmeta is not None:
             # Create phi1 range for spline plotting
-            phi1_min = ax[1].get_xlim()[0]
-            phi1_max = ax[1].get_xlim()[1]
+            phi1_min = x_min
+            phi1_max = x_max
+            if not np.isfinite(phi1_min) or not np.isfinite(phi1_max) or phi1_max <= phi1_min:
+                # fallback to axis current limits if bad range
+                phi1_min, phi1_max = ax[1].get_xlim()
+                if phi1_max <= phi1_min:
+                    phi1_max = phi1_min + 1e-6
             phi1_spline_plot = np.linspace(phi1_min, phi1_max, 100)
             
             # Plot initial guess splines in black
@@ -1465,59 +1518,65 @@ class StreamPlotter:
                         print(f"Warning: Could not plot initial splines: {e}")
             
             # Plot optimized splines in red
-            if show_optimized_splines and hasattr(self.mcmeta, 'optimized_params'):
-                if hasattr(self.mcmeta, 'phi1_spline_points'):
+            if show_optimized_splines:
+                # Prefer mcmeta.optimized_params, but fall back to mcmeta.sp_output if needed
+                opt_params = None
+                if hasattr(self.mcmeta, 'optimized_params'):
+                    opt_params = self.mcmeta.optimized_params
+                elif hasattr(self.mcmeta, 'sp_output'):
+                    opt_params = self.mcmeta.sp_output
+                if hasattr(self.mcmeta, 'phi1_spline_points') and opt_params is not None:
                     try:
                         # VGSR spline
                         vgsr_optimized = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
-                            self.mcmeta.optimized_params['vgsr_spline_points'], k=2
+                            opt_params['vgsr_spline_points'], k=2
                         )
                         ax[1].plot(phi1_spline_plot, vgsr_optimized, 'r-', linewidth=2, 
                                   label='Optimized Spline', alpha=0.8)
                         
                         # Add circle markers at spline points
                         ax[1].scatter(self.mcmeta.phi1_spline_points, 
-                                     self.mcmeta.optimized_params['vgsr_spline_points'],
+                                     opt_params['vgsr_spline_points'],
                                      marker='o', color='red', s=50, zorder=10, alpha=0.8,
                                      edgecolors='white', linewidth=1)
                         
                         # PMRA spline
                         pmra_optimized = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
-                            self.mcmeta.optimized_params['pmra_spline_points'], k=2
+                            opt_params['pmra_spline_points'], k=2
                         )
                         ax[2].plot(phi1_spline_plot, pmra_optimized, 'r-', linewidth=2, 
                                   label='Optimized Spline', alpha=0.8)
                         
                         # Add circle markers at spline points
                         ax[2].scatter(self.mcmeta.phi1_spline_points, 
-                                     self.mcmeta.optimized_params['pmra_spline_points'],
+                                     opt_params['pmra_spline_points'],
                                      marker='o', color='red', s=50, zorder=10, alpha=0.8,
                                      edgecolors='white', linewidth=1)
                         
                         # PMDEC spline
                         pmdec_optimized = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
-                            self.mcmeta.optimized_params['pmdec_spline_points'], k=2
+                            opt_params['pmdec_spline_points'], k=2
                         )
                         ax[3].plot(phi1_spline_plot, pmdec_optimized, 'r-', linewidth=2, 
                                   label='Optimized Spline', alpha=0.8)
                         
                         # Add circle markers at spline points
                         ax[3].scatter(self.mcmeta.phi1_spline_points, 
-                                     self.mcmeta.optimized_params['pmdec_spline_points'],
+                                     opt_params['pmdec_spline_points'],
                                      marker='o', color='red', s=50, zorder=10, alpha=0.8,
                                      edgecolors='white', linewidth=1)
                         
                         # FEH constant line
-                        feh_optimized = np.full_like(phi1_spline_plot, self.mcmeta.optimized_params['feh1'])
+                        feh_optimized = np.full_like(phi1_spline_plot, opt_params['feh1'])
                         ax[4].plot(phi1_spline_plot, feh_optimized, 'r-', linewidth=2, 
                                   label='Optimized [Fe/H]', alpha=0.8)
                         
                         # Add circle markers at spline points for FEH (constant value)
                         ax[4].scatter(self.mcmeta.phi1_spline_points, 
-                                     np.full_like(self.mcmeta.phi1_spline_points, self.mcmeta.optimized_params['feh1']),
+                                     np.full_like(self.mcmeta.phi1_spline_points, opt_params['feh1']),
                                      marker='o', color='red', s=50, zorder=10, alpha=0.8,
                                      edgecolors='white', linewidth=1)
                     except Exception as e:
@@ -1711,6 +1770,80 @@ class StreamPlotter:
                     print(f"Warning: Could not plot MCMC splines: {e}")
                     print("Make sure 'meds' dictionary with MCMC results is available in the calling scope")
         
+        # If requested, set y-limits based on spline curves with small padding
+        if (show_initial_splines or show_optimized_splines or show_mcmc_splines) and stream_frame and self.mcmeta is not None:
+            # Build list of curves actually plotted
+            ypads = {
+                1: 10.0,   # VGSR pad [km/s]
+                2: 1.0,    # PMRA pad [mas/yr]
+                3: 1.0,    # PMDEC pad [mas/yr]
+                4: 0.10,   # FEH pad [dex]
+            }
+            # Recompute curves over phi1_spline_plot if available
+            try:
+                phi1_min, phi1_max = ax[1].get_xlim()
+                phi1_spline_plot = np.linspace(phi1_min, phi1_max, 200)
+                curves = {1: [], 2: [], 3: [], 4: []}
+
+                if show_initial_splines and hasattr(self.mcmeta, 'phi1_spline_points'):
+                    try:
+                        curves[1].append(stream_funcs.apply_spline(phi1_spline_plot, self.mcmeta.phi1_spline_points, self.mcmeta.initial_params['vgsr_spline_points'], k=2))
+                        curves[2].append(stream_funcs.apply_spline(phi1_spline_plot, self.mcmeta.phi1_spline_points, self.mcmeta.initial_params['pmra_spline_points'], k=2))
+                        curves[3].append(stream_funcs.apply_spline(phi1_spline_plot, self.mcmeta.phi1_spline_points, self.mcmeta.initial_params['pmdec_spline_points'], k=2))
+                        curves[4].append(np.full_like(phi1_spline_plot, self.mcmeta.initial_params['feh1']))
+                    except Exception:
+                        pass
+                if show_optimized_splines:
+                    opt_params = getattr(self.mcmeta, 'optimized_params', None) or getattr(self.mcmeta, 'sp_output', None)
+                    if opt_params is not None and hasattr(self.mcmeta, 'phi1_spline_points'):
+                        try:
+                            curves[1].append(stream_funcs.apply_spline(phi1_spline_plot, self.mcmeta.phi1_spline_points, opt_params['vgsr_spline_points'], k=2))
+                            curves[2].append(stream_funcs.apply_spline(phi1_spline_plot, self.mcmeta.phi1_spline_points, opt_params['pmra_spline_points'], k=2))
+                            curves[3].append(stream_funcs.apply_spline(phi1_spline_plot, self.mcmeta.phi1_spline_points, opt_params['pmdec_spline_points'], k=2))
+                            curves[4].append(np.full_like(phi1_spline_plot, opt_params['feh1']))
+                        except Exception:
+                            pass
+                if show_mcmc_splines:
+                    try:
+                        # Find meds again in scope (best effort)
+                        import inspect
+                        frame = inspect.currentframe()
+                        cf = frame.f_back
+                        meds = None
+                        while cf:
+                            if 'meds' in cf.f_globals:
+                                meds = cf.f_globals['meds']
+                                break
+                            if 'meds' in cf.f_locals:
+                                meds = cf.f_locals['meds']
+                                break
+                            cf = cf.f_back
+                        if meds is not None:
+                            no_of_spline_points = len(self.mcmeta.phi1_spline_points)
+                            vgsr_points = np.array([meds[f'vgsr{i}'] for i in range(1, no_of_spline_points + 1)])
+                            pmra_points = np.array([meds[f'pmra{i}'] for i in range(1, no_of_spline_points + 1)])
+                            pmdec_points = np.array([meds[f'pmdec{i}'] for i in range(1, no_of_spline_points + 1)])
+                            curves[1].append(stream_funcs.apply_spline(phi1_spline_plot, self.mcmeta.phi1_spline_points, vgsr_points, k=2))
+                            curves[2].append(stream_funcs.apply_spline(phi1_spline_plot, self.mcmeta.phi1_spline_points, pmra_points, k=2))
+                            curves[3].append(stream_funcs.apply_spline(phi1_spline_plot, self.mcmeta.phi1_spline_points, pmdec_points, k=2))
+                            curves[4].append(np.full_like(phi1_spline_plot, meds['feh1']))
+                    except Exception:
+                        pass
+
+                # Apply y-limits if we collected any curves
+                for i in [1, 2, 3, 4]:
+                    valid = [c for c in curves[i] if c is not None and np.any(np.isfinite(c))]
+                    if len(valid) > 0:
+                        y_min = min(np.nanmin(c) for c in valid)
+                        y_max = max(np.nanmax(c) for c in valid)
+                        pad = ypads[i]
+                        if np.isfinite(y_min) and np.isfinite(y_max):
+                            if y_max <= y_min:
+                                y_max = y_min + 1e-6
+                            ax[i].set_ylim(y_min - pad, y_max + pad)
+            except Exception:
+                pass
+
         # Labels and formatting
         if show_initial_splines or show_optimized_splines or show_mcmc_splines:
             # Add legends to kinematic plots if splines are shown
@@ -2050,28 +2183,32 @@ class MCMeta:
         self.flat_p0_guess = np.hstack(self.p0_guess) 
 
     def scipy_optimize(self):
-        self.param_labels = ['pstream', 'vgsr_spline_points', 'lsigvgsr', 'feh1', 'lsigfeh', 
-            'pmra_spline_points', 'lsigpmra', 'pmdec_spline_points', 'lsigpmdec',
-                'bv', 'lsigbv', 'bfeh', 'lsigbfeh', 'bpmra', 'lsigbpmra', 'bpmdec', 'lsigbpmdec']
+        self.param_labels = ['pstream', 'vgsr_spline_points', 'lsigvgsr', 'feh1', 'lsigfeh',
+                             'pmra_spline_points', 'lsigpmra', 'pmdec_spline_points', 'lsigpmdec',
+                             'bv', 'lsigbv', 'bfeh', 'lsigbfeh', 'bpmra', 'lsigbpmra', 'bpmdec', 'lsigbpmdec']
+
         optfunc = lambda theta: -stream_funcs.spline_lnprob_1D(
-            theta, self.prior_arr, self.phi1_spline_points,  # Only phi1_spline_points needed
+            theta, self.prior_arr, self.phi1_spline_points,
             self.stream.data.desi_data['VGSR'], self.stream.data.desi_data['VRAD_ERR'],
             self.stream.data.desi_data['FEH'], self.stream.data.desi_data['FEH_ERR'],
             self.stream.data.desi_data['PMRA'], self.stream.data.desi_data['PMRA_ERROR'],
             self.stream.data.desi_data['PMDEC'], self.stream.data.desi_data['PMDEC_ERROR'],
-            self.stream.data.desi_data['phi1'], 
-            trunc_fit=True, feh_fit=True, assert_prior=False, k=self.spline_k, 
+            self.stream.data.desi_data['phi1'],
+            trunc_fit=True, feh_fit=True, assert_prior=False, k=self.spline_k,
             reshape_arr_shape=self.array_lengths,
-            vgsr_trunc=self.vgsr_trunc, feh_trunc=self.feh_trunc, 
+            vgsr_trunc=self.vgsr_trunc, feh_trunc=self.feh_trunc,
             pmra_trunc=self.pmra_trunc, pmdec_trunc=self.pmdec_trunc
-)
-    # Run optimization
+        )
+
+        # Run optimization
         print("Running optimization...")
         self.sp_result = sp.optimize.minimize(optfunc, self.flat_p0_guess, method="Nelder-Mead")
         print(self.sp_result.message)
 
         self.reshaped_result = stream_funcs.reshape_arr(self.sp_result.x, self.array_lengths)
         self.sp_output = stream_funcs.get_paramdict(self.reshaped_result, labels=self.param_labels)
+        # Expose optimized parameters for plotting functions
+        self.optimized_params = self.sp_output
 
         print("\nOptimized Parameters:")
         for label, value in self.sp_output.items():
