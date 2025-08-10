@@ -62,10 +62,10 @@ class Data:
         self.desi_data['FEH_ERR'] = np.sqrt(self.desi_data['FEH_ERR']**2 + 0.01**2) ### Turn into its own column
 
 
-        # Apply Metallicity correction to the DR1 Data (See Section 4.2 https://arxiv.org/pdf/2505.14787)
-        print("Adding empirical FEH calibration (can find uncalibrated data in column['FEH_uncalib])")
-        self.desi_data['FEH_uncalib'] = self.desi_data['FEH']
-        self.desi_data['FEH'] = feh_correct.calibrate(self.desi_data['FEH'], self.desi_data['TEFF'], self.desi_data['LOGG'])
+        # # Apply Metallicity correction to the DR1 Data (See Section 4.2 https://arxiv.org/pdf/2505.14787)
+        # print("Adding empirical FEH calibration (can find uncalibrated data in column['FEH_uncalib])")
+        # self.desi_data['FEH_uncalib'] = self.desi_data['FEH']
+        # self.desi_data['FEH'] = feh_correct.calibrate(self.desi_data['FEH'], self.desi_data['TEFF'], self.desi_data['LOGG'])
         
         # Switch to VGSR instead of VRAD
         self.desi_data['VGSR'] =  np.array(stream_funcs.vhel_to_vgsr(np.array(self.desi_data['TARGET_RA'])*u.deg, np.array(self.desi_data['TARGET_DEC'])*u.deg, np.array(self.desi_data['VRAD'])*u.km/u.s).value)
