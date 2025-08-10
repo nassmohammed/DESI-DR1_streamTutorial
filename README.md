@@ -62,9 +62,9 @@ git clone https://github.com/nassmohammed/DESI-DR1_streamTutorial.git
 
 Included is
 - `data/` - directory including small data files needed for this tutorial
-  - `dotter/` - Stellar evolution models from Dotter et al. XXXX
+  - `dotter/` - Stellar evolution models from Dotter et al. 2006
   - `sf3_only_table.csv` - overview table of STREAMFINDER streams
-  - `streamfinder_gaiadr3.fits` - file including stars in STREAMFINDER streams
+  - `streamfinder_gaiadr3.fits` - file including stars in STREAMFINDER streams (modified from Ibata et al. 2024)
 - `stream_examples/` - directory including .html files from succesfully run notebook. This is your cheatsheet, only use if you're truly stuck!
 - `*.py` - scripts powering the tutorial
 - `streamTutorial.ipynb` - the main notebook you will be working with.
@@ -94,4 +94,20 @@ This will set up the proper python environment to run this notebook.
 
 ## User tips & FAQ
 W.I.P.
+
+
+# Bibliography
+
+Ibata, R., Malhan, K., Tenachi, W., Ardern-Arentsen, A., Bellazzini, M., Bianchini, P., Bonifacio, P., Caffau, E., Diakogiannis, F., Errani, R., Famaey, B., Ferrone, S., Martin, N. F., di Matteo, P., Monari, G., Renaud, F., Starkenburg, E., Thomas, G., Viswanathan, A., & Yuan, Z. (2024). Charting the Galactic Acceleration Field. II. A Global Mass Model of the Milky Way from the STREAMFINDER Atlas of Stellar Streams Detected in Gaia DR3. The Astrophysical Journal, 967(1), 89. https://doi.org/10.3847/1538-4357/ad382d
+
+Koposov, S. E., Li, T. S., Allende Prieto, C., Medina, G. E., Sandford, N., Aguado, D., Beraldo e Silva, L., Byström, A., Cooper, A. P., Dey, A., Frenk, C. S., et al. (2025). DESI Data Release 1: Stellar Catalogue. arXiv preprint arXiv:2505.14787.
+
+Mateu, C. (2023). galstreams: A library of Milky Way stellar stream footprints and tracks. Monthly Notices of the Royal Astronomical Society, 520(4), 5225–5258. https://doi.org/10.1093/mnras/stad321
+
+# Acknowlegements
+![alt text](/DESI-DR1_streamTutorial/img_examples/desi.png)
+
+<img src="img_examples/LSST.png" alt="LSST logo" width="250">
+
+Thanks to the LSST-DA Data Science Fellowship Program, which is funded by LSST-DA, the Brinson Foundation, the WoodNext Foundation, and the Research Corporation for Science Advancement Foundation; participation in this program has benefited this work.
 
