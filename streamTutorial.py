@@ -52,7 +52,9 @@ class Data:
         (self.desi_data['VRAD_ERR'] < 10) & (self.desi_data['FEH_ERR'] < 0.5)] 
         self.desi_data.remove_columns(['RVS_WARN', 'RR_SPECTYPE'])
         self.desi_data = self.desi_data.to_pandas()
-
+        # remove stars with FLUX_G and FLUX_R as NaN
+        self.desi_data = self.desi_data[~self.desi_data['FLUX_G'].isna() | ~self.desi_data['FLUX_R'].isna() |  ~self.desi_data['EBV'].isna()]
+        
         print(f"Length after NaN cut: {len(self.desi_data)}")
 
         # Applying additional errors in quadrature
@@ -1559,6 +1561,13 @@ class StreamPlotter:
                 phi1_min_members = high_prob_phi1.min()
                 phi1_max_members = high_prob_phi1.max()
                 
+                # Extend range to include all spline points if splines are being shown
+                if (show_initial_splines or show_optimized_splines or show_mcmc_splines) and hasattr(self, 'mcmeta') and self.mcmeta is not None and hasattr(self.mcmeta, 'phi1_spline_points'):
+                    spline_min = np.min(self.mcmeta.phi1_spline_points)
+                    spline_max = np.max(self.mcmeta.phi1_spline_points)
+                    phi1_min_members = min(phi1_min_members, spline_min)
+                    phi1_max_members = max(phi1_max_members, spline_max)
+                
                 # Add some padding
                 phi1_range_members = phi1_max_members - phi1_min_members
                 phi1_padding = 0.05 * phi1_range_members if phi1_range_members > 0 else 1.0
@@ -1571,6 +1580,14 @@ class StreamPlotter:
             # Use all plotted data for x-limits if no membership probabilities
             phi1_min_data = np.min(phi1_values_for_limits)
             phi1_max_data = np.max(phi1_values_for_limits)
+            
+            # Extend range to include all spline points if splines are being shown
+            if (show_initial_splines or show_optimized_splines or show_mcmc_splines) and hasattr(self, 'mcmeta') and self.mcmeta is not None and hasattr(self.mcmeta, 'phi1_spline_points'):
+                spline_min = np.min(self.mcmeta.phi1_spline_points)
+                spline_max = np.max(self.mcmeta.phi1_spline_points)
+                phi1_min_data = min(phi1_min_data, spline_min)
+                phi1_max_data = max(phi1_max_data, spline_max)
+            
             phi1_range_data = phi1_max_data - phi1_min_data
             phi1_padding = 0.02 * phi1_range_data if phi1_range_data > 0 else 1.0
             x_limits = (phi1_min_data - phi1_padding, phi1_max_data + phi1_padding)
