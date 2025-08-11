@@ -124,8 +124,7 @@ Mateu, C. (2023). galstreams: A library of Milky Way stellar stream footprints a
 
 # Acknowlegements
 ![alt text](img_examples/desi.png)
-
-<img src="img_examples/LSST.png" alt="LSST logo" width="250">
+![alt text](img_examples/LSST.png)
 
 Thanks to the LSST-DA Data Science Fellowship Program, which is funded by LSST-DA, the Brinson Foundation, the WoodNext Foundation, and the Research Corporation for Science Advancement Foundation; participation in this program has benefited this work.
 
