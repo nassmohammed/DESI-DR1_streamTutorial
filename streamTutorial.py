@@ -1999,7 +1999,7 @@ class StreamPlotter:
                         
                         # Plot 1 sigma and 2 sigma regions covering full spline length
                         sigma_vgsr = 10**meds['lsigvgsr']
-                        print(phi1_spline_plot.min())
+
                         if residual_mode:
                             ax[1].fill_between(phi1_spline_plot, -sigma_vgsr, +sigma_vgsr, color='blue', alpha=0.1)
                             ax[1].fill_between(phi1_spline_plot, -2*sigma_vgsr, +2*sigma_vgsr, color='blue', alpha=0.05)
