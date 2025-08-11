@@ -68,14 +68,26 @@ class Data:
         # self.desi_data['FEH'] = feh_correct.calibrate(self.desi_data['FEH'], self.desi_data['TEFF'], self.desi_data['LOGG'])
         
         # Switch to VGSR instead of VRAD
-        self.desi_data['VGSR'] =  np.array(stream_funcs.vhel_to_vgsr(np.array(self.desi_data['TARGET_RA'])*u.deg, np.array(self.desi_data['TARGET_DEC'])*u.deg, np.array(self.desi_data['VRAD'])*u.km/u.s).value)
+        self.desi_data['VGSR'] = np.array(
+            stream_funcs.vhel_to_vgsr(
+                np.array(self.desi_data['TARGET_RA']) * u.deg,
+                np.array(self.desi_data['TARGET_DEC']) * u.deg,
+                np.array(self.desi_data['VRAD']) * (u.km / u.s),
+            ).value
+        )
 
         # Lets load the STREAMFINDER data for Gaia DR3
         if sf_path:
             sf_data = table.Table.read(self.sf_path)
             self.sf_data = sf_data.to_pandas()
-            self.sf_data['VGSR'] = np.array(stream_funcs.vhel_to_vgsr(np.array(self.sf_data['RAdeg'])*u.deg, np.array(self.sf_data['DEdeg'])*u.deg, np.array(self.sf_data['VHel'])*u.km/u.s).value)
-        else: 
+            self.sf_data['VGSR'] = np.array(
+                stream_funcs.vhel_to_vgsr(
+                    np.array(self.sf_data['RAdeg']) * u.deg,
+                    np.array(self.sf_data['DEdeg']) * u.deg,
+                    np.array(self.sf_data['VHel']) * (u.km / u.s),
+                ).value
+            )
+        else:
             print('No STREAMFINDER path given.')
 
         
@@ -614,6 +626,103 @@ class StreamPlotter:
                 'label':'DESI',
                 'alpha': 0.02,
                 'zorder':0
+            },
+            # Centralized styles used in sixD_plot
+            'sf_errorbar': {
+                'ecolor': 'k',
+                'elinewidth': 0.8,
+                'capsize': 2,
+                'alpha': 0.8,
+                'zorder': 4
+            },
+            'member_errorbar': {
+                'ecolor': 'black',
+                'elinewidth': 0.8,
+                'capsize': 2,
+                'alpha': 0.8,
+                'zorder': 5
+            },
+            'initial_spline_line': {
+                'color': 'k',
+                'lw': 2,
+                'alpha': 0.8,
+                'label': 'Initial Spline'
+            },
+            'optimized_spline_line': {
+                'color': 'r',
+                'lw': 2,
+                'alpha': 0.8,
+                'label': 'Optimized Spline'
+            },
+            'initial_feh_line': {
+                'color': 'k',
+                'lw': 2,
+                'alpha': 0.8,
+                'label': 'Initial [Fe/H]'
+            },
+            'optimized_feh_line': {
+                'color': 'r',
+                'lw': 2,
+                'alpha': 0.8,
+                'label': 'Optimized [Fe/H]'
+            },
+            'spline_knot_initial': {
+                'marker': 'o',
+                'color': 'black',
+                's': 50,
+                'zorder': 10,
+                'alpha': 0.8,
+                'edgecolors': 'white',
+                'linewidth': 1
+            },
+            'spline_knot_optimized': {
+                'marker': 'o',
+                'color': 'red',
+                's': 50,
+                'zorder': 10,
+                'alpha': 0.8,
+                'edgecolors': 'white',
+                'linewidth': 1
+            },
+            'membership_scatter': {
+                'marker': 'o',
+                's': 25,
+                'edgecolor': 'black',
+                'linewidth': 0.5,
+                'alpha': 0.8,
+                'zorder': 6
+            },
+            'sf_high_prob_diamond': {
+                'marker': 'D',
+                's': 40,
+                'edgecolor': 'black',
+                'linewidth': 1,
+                'alpha': 1.0,
+                'zorder': 7
+            },
+            'sf_low_prob_diamond': {
+                'marker': 'D',
+                's': 40,
+                'color': 'black',
+                'edgecolor': 'black',
+                'linewidth': 1,
+                'alpha': 1.0,
+                'zorder': 7
+            },
+            'membership_colorbar': {
+                'cmap': 'viridis',
+                'label': 'Membership Probability',
+                'pad': 0.02,
+                'aspect': 50,
+                'shrink': 1.0,
+                'location': 'right',
+                'labelpad': 15
+            },
+            'limits': {
+                'feh_ylim_default': (-4, -0.5),
+                'residual_pad_vgsr': 20,
+                'residual_pad_pm': 2,
+                'residual_pad_feh': 0.2
             }
         }
     
@@ -988,7 +1097,7 @@ class StreamPlotter:
 
     def sixD_plot(self, showStream=True, show_sf_only=False, background=True, save=False, stream_frame=True, galstream=False, show_cut=False, 
                   show_initial_splines=False, show_optimized_splines=False, show_mcmc_splines=False, show_sf_errors=True, 
-                  show_membership_prob=False, stream_prob=None, min_prob=0.5):
+                  show_membership_prob=False, stream_prob=None, min_prob=0.5, show_residuals=False):
         """
         Plots the stream phi1 vs phi2, vgsr, pmra, pmdec, and feh
         
@@ -1010,6 +1119,9 @@ class StreamPlotter:
             Array of membership probabilities for DESI stars. Required if show_membership_prob=True.
         min_prob : float, optional
             Minimum membership probability threshold for highlighting stars. Default is 0.5.
+        show_residuals : bool, optional
+            If True and show_mcmc_splines=True in stream_frame, plot residuals (data - MCMC spline) for
+            VGSR/PMRA/PMDEC/FEH so the MCMC spline lies along y=0. Ignored if MCMC results are unavailable.
         """
         if stream_frame:
             col_x = 'phi1'
@@ -1024,6 +1136,70 @@ class StreamPlotter:
         else:
             fig, ax = plt.subplots(5, 1, figsize=(10, 15))
         
+        # Residuals mode prep (only applicable with MCMC splines in stream frame)
+        residual_mode = False
+        preds = {'desi': {}, 'sf': {}, 'sf_cut': {}, 'sf_only': {}}
+        if show_residuals and show_mcmc_splines and stream_frame and hasattr(self, 'mcmeta') and self.mcmeta is not None and hasattr(self.mcmeta, 'phi1_spline_points'):
+            try:
+                import inspect
+                frame = inspect.currentframe()
+                meds = None
+                caller_frame = frame.f_back
+                while caller_frame:
+                    if 'meds' in caller_frame.f_globals:
+                        meds = caller_frame.f_globals['meds']
+                        break
+                    if 'meds' in caller_frame.f_locals:
+                        meds = caller_frame.f_locals['meds']
+                        break
+                    caller_frame = caller_frame.f_back
+                del frame
+                if meds is None:
+                    raise NameError('meds not found in calling context')
+
+                npts = len(self.mcmeta.phi1_spline_points)
+                vgsr_knots = np.array([meds[f'vgsr{i}'] for i in range(1, npts+1)])
+                pmra_knots = np.array([meds[f'pmra{i}'] for i in range(1, npts+1)])
+                pmdec_knots = np.array([meds[f'pmdec{i}'] for i in range(1, npts+1)])
+                feh_const = meds['feh1']
+
+                def eval_spline(phi1_vals, knots):
+                    return stream_funcs.apply_spline(phi1_vals, self.mcmeta.phi1_spline_points, knots, k=2)
+
+                # DESI predictions
+                phi1_desi = self.data.desi_data[col_x].values
+                preds['desi']['vgsr'] = eval_spline(phi1_desi, vgsr_knots)
+                preds['desi']['pmra'] = eval_spline(phi1_desi, pmra_knots)
+                preds['desi']['pmdec'] = eval_spline(phi1_desi, pmdec_knots)
+                preds['desi']['feh'] = np.full_like(phi1_desi, feh_const, dtype=float)
+
+                # SF in DESI predictions
+                if hasattr(self.data, 'confirmed_sf_and_desi'):
+                    phi1_sf = self.data.confirmed_sf_and_desi[col_x].values
+                    preds['sf']['vgsr'] = eval_spline(phi1_sf, vgsr_knots)
+                    preds['sf']['pmra'] = eval_spline(phi1_sf, pmra_knots)
+                    preds['sf']['pmdec'] = eval_spline(phi1_sf, pmdec_knots)
+                    preds['sf']['feh'] = np.full_like(phi1_sf, feh_const, dtype=float)
+
+                # Cut SF predictions
+                if hasattr(self.data, 'cut_confirmed_sf_and_desi'):
+                    phi1_sf_cut = self.data.cut_confirmed_sf_and_desi[col_x].values
+                    preds['sf_cut']['vgsr'] = eval_spline(phi1_sf_cut, vgsr_knots)
+                    preds['sf_cut']['pmra'] = eval_spline(phi1_sf_cut, pmra_knots)
+                    preds['sf_cut']['pmdec'] = eval_spline(phi1_sf_cut, pmdec_knots)
+                    preds['sf_cut']['feh'] = np.full_like(phi1_sf_cut, feh_const, dtype=float)
+
+                # SF only (not in DESI)
+                if hasattr(self.data, 'confirmed_sf_not_desi'):
+                    phi1_sfo = self.data.confirmed_sf_not_desi[col_x_].values
+                    preds['sf_only']['vgsr'] = eval_spline(phi1_sfo, vgsr_knots)
+                    preds['sf_only']['pmRA'] = eval_spline(phi1_sfo, pmra_knots)
+                    preds['sf_only']['pmDE'] = eval_spline(phi1_sfo, pmdec_knots)
+
+                residual_mode = True
+            except Exception as e:
+                print(f"Warning: Residuals mode disabled (MCMC meds not available): {e}")
+        
         # Plot 1: phi2 vs phi1 (or DEC vs RA)
         if stream_frame:
             col_y0 = 'phi2'
@@ -1036,52 +1212,55 @@ class StreamPlotter:
             
         if showStream:
             if show_sf_errors:
-                # Plot with error bars - create compatible parameters for errorbar
-                # Only use parameters that work with both errorbar and scatter
-                errorbar_params = {
-                    'color': self.plot_params['sf_in_desi'].get('color', 'green'),
-                    'label': self.plot_params['sf_in_desi'].get('label', 'SF $\\in$ DESI'),
-                    'zorder': self.plot_params['sf_in_desi'].get('zorder', 5),
-                    'alpha': self.plot_params['sf_in_desi'].get('alpha', 1.0),
-                    'markersize': 6,  # Use markersize instead of s
-                    'markeredgecolor': self.plot_params['sf_in_desi'].get('edgecolor', 'k'),
-                    'ecolor': self.plot_params['sf_in_desi'].get('edgecolor', 'k'),
-                    'capsize': 2,
-                }
-                
-                ax[0].errorbar(
-                    self.data.confirmed_sf_and_desi[col_x],
-                    self.data.confirmed_sf_and_desi[col_y0],
-                    xerr=None, yerr=None,
-                    fmt='d', **errorbar_params  # Use diamond marker like the original
-                )
-                # VGSR with error bars
+                # Draw error bars first (behind), then overlay member points
+                err_params = {'fmt': 'none'}
+                err_params.update(self.plot_params.get('sf_errorbar', {}))
+                # Only kinematics/abundance panels have measurement errors; no errorbar for phi2
                 ax[1].errorbar(
                     self.data.confirmed_sf_and_desi[col_x],
-                    self.data.confirmed_sf_and_desi['VGSR'],
-                    xerr=None, yerr=self.data.confirmed_sf_and_desi['VRAD_ERR'],
-                    fmt='d', **errorbar_params
+                    (self.data.confirmed_sf_and_desi['VGSR'] - preds['sf'].get('vgsr', 0)) if residual_mode else self.data.confirmed_sf_and_desi['VGSR'],
+                    yerr=self.data.confirmed_sf_and_desi['VRAD_ERR'], **err_params
                 )
-                # PMRA with error bars
                 ax[2].errorbar(
                     self.data.confirmed_sf_and_desi[col_x],
-                    self.data.confirmed_sf_and_desi['PMRA'],
-                    xerr=None, yerr=self.data.confirmed_sf_and_desi['PMRA_ERROR'],
-                    fmt='d', **errorbar_params
+                    (self.data.confirmed_sf_and_desi['PMRA'] - preds['sf'].get('pmra', 0)) if residual_mode else self.data.confirmed_sf_and_desi['PMRA'],
+                    yerr=self.data.confirmed_sf_and_desi['PMRA_ERROR'], **err_params
                 )
-                # PMDEC with error bars
                 ax[3].errorbar(
                     self.data.confirmed_sf_and_desi[col_x],
-                    self.data.confirmed_sf_and_desi['PMDEC'],
-                    xerr=None, yerr=self.data.confirmed_sf_and_desi['PMDEC_ERROR'],
-                    fmt='d', **errorbar_params
+                    (self.data.confirmed_sf_and_desi['PMDEC'] - preds['sf'].get('pmdec', 0)) if residual_mode else self.data.confirmed_sf_and_desi['PMDEC'],
+                    yerr=self.data.confirmed_sf_and_desi['PMDEC_ERROR'], **err_params
                 )
-                # FEH with error bars
                 ax[4].errorbar(
                     self.data.confirmed_sf_and_desi[col_x],
-                    self.data.confirmed_sf_and_desi['FEH'],
-                    xerr=None, yerr=self.data.confirmed_sf_and_desi['FEH_ERR'],
-                    fmt='d', **errorbar_params
+                    (self.data.confirmed_sf_and_desi['FEH'] - preds['sf'].get('feh', 0)) if residual_mode else self.data.confirmed_sf_and_desi['FEH'],
+                    yerr=self.data.confirmed_sf_and_desi['FEH_ERR'], **err_params
+                )
+                # Now overlay the member points
+                ax[0].scatter(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    self.data.confirmed_sf_and_desi[col_y0],
+                    **self.plot_params['sf_in_desi']
+                )
+                ax[1].scatter(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    (self.data.confirmed_sf_and_desi['VGSR'] - preds['sf'].get('vgsr', 0)) if residual_mode else self.data.confirmed_sf_and_desi['VGSR'],
+                    **self.plot_params['sf_in_desi']
+                )
+                ax[2].scatter(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    (self.data.confirmed_sf_and_desi['PMRA'] - preds['sf'].get('pmra', 0)) if residual_mode else self.data.confirmed_sf_and_desi['PMRA'],
+                    **self.plot_params['sf_in_desi']
+                )
+                ax[3].scatter(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    (self.data.confirmed_sf_and_desi['PMDEC'] - preds['sf'].get('pmdec', 0)) if residual_mode else self.data.confirmed_sf_and_desi['PMDEC'],
+                    **self.plot_params['sf_in_desi']
+                )
+                ax[4].scatter(
+                    self.data.confirmed_sf_and_desi[col_x],
+                    (self.data.confirmed_sf_and_desi['FEH'] - preds['sf'].get('feh', 0)) if residual_mode else self.data.confirmed_sf_and_desi['FEH'],
+                    **self.plot_params['sf_in_desi']
                 )
             else:
                 # Plot without error bars (original behavior)
@@ -1092,22 +1271,22 @@ class StreamPlotter:
                 )
                 ax[1].scatter(
                     self.data.confirmed_sf_and_desi[col_x],
-                    self.data.confirmed_sf_and_desi['VGSR'],
+                    (self.data.confirmed_sf_and_desi['VGSR'] - preds['sf'].get('vgsr', 0)) if residual_mode else self.data.confirmed_sf_and_desi['VGSR'],
                     **self.plot_params['sf_in_desi']
                 )
                 ax[2].scatter(
                     self.data.confirmed_sf_and_desi[col_x],
-                    self.data.confirmed_sf_and_desi['PMRA'],
+                    (self.data.confirmed_sf_and_desi['PMRA'] - preds['sf'].get('pmra', 0)) if residual_mode else self.data.confirmed_sf_and_desi['PMRA'],
                     **self.plot_params['sf_in_desi']
                 )
                 ax[3].scatter(
                     self.data.confirmed_sf_and_desi[col_x],
-                    self.data.confirmed_sf_and_desi['PMDEC'],
+                    (self.data.confirmed_sf_and_desi['PMDEC'] - preds['sf'].get('pmdec', 0)) if residual_mode else self.data.confirmed_sf_and_desi['PMDEC'],
                     **self.plot_params['sf_in_desi']
                 )
                 ax[4].scatter(
                     self.data.confirmed_sf_and_desi[col_x],
-                    self.data.confirmed_sf_and_desi['FEH'],
+                    (self.data.confirmed_sf_and_desi['FEH'] - preds['sf'].get('feh', 0)) if residual_mode else self.data.confirmed_sf_and_desi['FEH'],
                     **self.plot_params['sf_in_desi']
                 )
             
@@ -1119,22 +1298,22 @@ class StreamPlotter:
                 )
                 ax[1].scatter(
                     self.data.cut_confirmed_sf_and_desi[col_x],
-                    self.data.cut_confirmed_sf_and_desi['VGSR'],
+                    (self.data.cut_confirmed_sf_and_desi['VGSR'] - preds['sf_cut'].get('vgsr', 0)) if residual_mode else self.data.cut_confirmed_sf_and_desi['VGSR'],
                     **self.plot_params['sf_in_desi_notsel']
                 )
                 ax[2].scatter(
                     self.data.cut_confirmed_sf_and_desi[col_x],
-                    self.data.cut_confirmed_sf_and_desi['PMRA'],
+                    (self.data.cut_confirmed_sf_and_desi['PMRA'] - preds['sf_cut'].get('pmra', 0)) if residual_mode else self.data.cut_confirmed_sf_and_desi['PMRA'],
                     **self.plot_params['sf_in_desi_notsel']
                 )
                 ax[3].scatter(
                     self.data.cut_confirmed_sf_and_desi[col_x],
-                    self.data.cut_confirmed_sf_and_desi['PMDEC'],
+                    (self.data.cut_confirmed_sf_and_desi['PMDEC'] - preds['sf_cut'].get('pmdec', 0)) if residual_mode else self.data.cut_confirmed_sf_and_desi['PMDEC'],
                     **self.plot_params['sf_in_desi_notsel']
                 )
                 ax[4].scatter(
                     self.data.cut_confirmed_sf_and_desi[col_x],
-                    self.data.cut_confirmed_sf_and_desi['FEH'],
+                    (self.data.cut_confirmed_sf_and_desi['FEH'] - preds['sf_cut'].get('feh', 0)) if residual_mode else self.data.cut_confirmed_sf_and_desi['FEH'],
                     **self.plot_params['sf_in_desi_notsel']
                 )
                 
@@ -1159,17 +1338,17 @@ class StreamPlotter:
             )
             ax[1].scatter(
                 self.data.confirmed_sf_not_desi[col_x_],
-                self.data.confirmed_sf_not_desi['VGSR'],
+                (self.data.confirmed_sf_not_desi['VGSR'] - preds['sf_only'].get('vgsr', 0)) if residual_mode else self.data.confirmed_sf_not_desi['VGSR'],
                 **self.plot_params['sf_not_desi']
             )
             ax[2].scatter(
                 self.data.confirmed_sf_not_desi[col_x_],
-                self.data.confirmed_sf_not_desi['pmRA'],
+                (self.data.confirmed_sf_not_desi['pmRA'] - preds['sf_only'].get('pmRA', 0)) if residual_mode else self.data.confirmed_sf_not_desi['pmRA'],
                 **self.plot_params['sf_not_desi']
             )
             ax[3].scatter(
                 self.data.confirmed_sf_not_desi[col_x_],
-                self.data.confirmed_sf_not_desi['pmDE'],
+                (self.data.confirmed_sf_not_desi['pmDE'] - preds['sf_only'].get('pmDE', 0)) if residual_mode else self.data.confirmed_sf_not_desi['pmDE'],
                 **self.plot_params['sf_not_desi']
             )
             # Note: FEH not available in sf_not_desi, skip this subplot
@@ -1182,22 +1361,22 @@ class StreamPlotter:
             )
             ax[1].scatter(
                 self.data.desi_data[col_x],
-                self.data.desi_data['VGSR'],
+                (self.data.desi_data['VGSR'] - preds['desi'].get('vgsr', 0)) if residual_mode else self.data.desi_data['VGSR'],
                 **self.plot_params['background']
             )
             ax[2].scatter(
                 self.data.desi_data[col_x],
-                self.data.desi_data['PMRA'],
+                (self.data.desi_data['PMRA'] - preds['desi'].get('pmra', 0)) if residual_mode else self.data.desi_data['PMRA'],
                 **self.plot_params['background']
             )
             ax[3].scatter(
                 self.data.desi_data[col_x],
-                self.data.desi_data['PMDEC'],
+                (self.data.desi_data['PMDEC'] - preds['desi'].get('pmdec', 0)) if residual_mode else self.data.desi_data['PMDEC'],
                 **self.plot_params['background']
             )
             ax[4].scatter(
                 self.data.desi_data[col_x],
-                self.data.desi_data['FEH'],
+                (self.data.desi_data['FEH'] - preds['desi'].get('feh', 0)) if residual_mode else self.data.desi_data['FEH'],
                 **self.plot_params['background']
             )
         
@@ -1215,50 +1394,50 @@ class StreamPlotter:
             high_prob_indices = np.where(high_prob_mask)[0]
             
             if len(high_prob_indices) > 0:
-                # Create colormap for membership probabilities (viridis from min_prob to 1)
+                # Create colormap for membership probabilities from settings
                 norm = colors.Normalize(vmin=min_prob, vmax=1.0)
-                cmap = cm.viridis
+                cmap_name = self.plot_params.get('membership_colorbar', {}).get('cmap', 'viridis')
+                cmap = cm.get_cmap(cmap_name)
                 
                 # Plot high probability DESI stars as circles with viridis colormap
-                scatter_params = {
-                    'marker': 'o',
-                    's': 25,
-                    'c': stream_prob[high_prob_indices],
-                    'cmap': 'viridis',
-                    'norm': norm,
-                    'edgecolor': 'black',
-                    'linewidth': 0.5,
-                    'alpha': 0.8,
-                    'zorder': 6,
-                    'label': f'High Prob Stars (≥{min_prob:.1f})'
-                }
+                base_member = self.plot_params.get('membership_scatter', {})
+                scatter_params = {**base_member,
+                                  'c': stream_prob[high_prob_indices],
+                                  'cmap': cmap,
+                                  'norm': norm,
+                                  'label': f'High Prob Stars (≥{min_prob:.1f})'}
                 
+                # Prepare y values (observed or residual) for errorbars and scatter
+                x_hp = self.data.desi_data[col_x].iloc[high_prob_indices]
+                y1_hp = self.data.desi_data['VGSR'].iloc[high_prob_indices]
+                y2_hp = self.data.desi_data['PMRA'].iloc[high_prob_indices]
+                y3_hp = self.data.desi_data['PMDEC'].iloc[high_prob_indices]
+                y4_hp = self.data.desi_data['FEH'].iloc[high_prob_indices]
+                if residual_mode:
+                    y1_hp = y1_hp - preds['desi'].get('vgsr', np.zeros(len(self.data.desi_data)))[high_prob_indices]
+                    y2_hp = y2_hp - preds['desi'].get('pmra', np.zeros(len(self.data.desi_data)))[high_prob_indices]
+                    y3_hp = y3_hp - preds['desi'].get('pmdec', np.zeros(len(self.data.desi_data)))[high_prob_indices]
+                    y4_hp = y4_hp - preds['desi'].get('feh', np.zeros(len(self.data.desi_data)))[high_prob_indices]
+
+                # Error bars for high-probability members (kinematics/abundance panels)
+                # Ensure error bars are behind the colored member markers
+                err_style = {'fmt': 'none'}
+                err_style.update(self.plot_params.get('member_errorbar', {}))
+
                 # Plot on each subplot
-                ax[0].scatter(
-                    self.data.desi_data[col_x].iloc[high_prob_indices],
-                    self.data.desi_data[col_y0].iloc[high_prob_indices],
-                    **scatter_params
-                )
-                ax[1].scatter(
-                    self.data.desi_data[col_x].iloc[high_prob_indices],
-                    self.data.desi_data['VGSR'].iloc[high_prob_indices],
-                    **{k: v for k, v in scatter_params.items() if k != 'label'}
-                )
-                ax[2].scatter(
-                    self.data.desi_data[col_x].iloc[high_prob_indices],
-                    self.data.desi_data['PMRA'].iloc[high_prob_indices],
-                    **{k: v for k, v in scatter_params.items() if k != 'label'}
-                )
-                ax[3].scatter(
-                    self.data.desi_data[col_x].iloc[high_prob_indices],
-                    self.data.desi_data['PMDEC'].iloc[high_prob_indices],
-                    **{k: v for k, v in scatter_params.items() if k != 'label'}
-                )
-                ax[4].scatter(
-                    self.data.desi_data[col_x].iloc[high_prob_indices],
-                    self.data.desi_data['FEH'].iloc[high_prob_indices],
-                    **{k: v for k, v in scatter_params.items() if k != 'label'}
-                )
+                ax[0].scatter(x_hp, self.data.desi_data[col_y0].iloc[high_prob_indices], **scatter_params)
+                # Add error bars on panels 1-4 using respective measurement errors
+                ax[1].errorbar(x_hp, y1_hp, yerr=self.data.desi_data['VRAD_ERR'].iloc[high_prob_indices], **err_style)
+                ax[2].errorbar(x_hp, y2_hp, yerr=self.data.desi_data['PMRA_ERROR'].iloc[high_prob_indices], **err_style)
+                ax[3].errorbar(x_hp, y3_hp, yerr=self.data.desi_data['PMDEC_ERROR'].iloc[high_prob_indices], **err_style)
+                ax[4].errorbar(x_hp, y4_hp, yerr=self.data.desi_data['FEH_ERR'].iloc[high_prob_indices], **err_style)
+                # Then scatter the colored member markers
+                ax[1].scatter(x_hp, y1_hp, **{k: v for k, v in scatter_params.items() if k != 'label'})
+                ax[2].scatter(x_hp, y2_hp, **{k: v for k, v in scatter_params.items() if k != 'label'})
+                ax[3].scatter(x_hp, y3_hp, **{k: v for k, v in scatter_params.items() if k != 'label'})
+                ax[4].scatter(x_hp, y4_hp, **{k: v for k, v in scatter_params.items() if k != 'label'})
+
+                # Note: error bars for members are already plotted above via err_style
                 
                 # Add colorbar to the far right of all plots
                 # Add colorbar to the overall figure instead of individual subplot
@@ -1271,8 +1450,15 @@ class StreamPlotter:
                     ax = ax.ravel()
 
                 # Position colorbar next to all subplots
-                cbar = fig.colorbar(sm, ax=ax, pad=0.02, aspect=50, shrink=1.0, location='right')
-                cbar.set_label('Membership Probability', rotation=270, labelpad=15)
+                cbp = self.plot_params.get('membership_colorbar', {})
+                cbar = fig.colorbar(sm, ax=ax,
+                                    pad=cbp.get('pad', 0.02),
+                                    aspect=cbp.get('aspect', 50),
+                                    shrink=cbp.get('shrink', 1.0),
+                                    location=cbp.get('location', 'right'))
+                cbar.set_label(cbp.get('label', 'Membership Probability'), rotation=270, labelpad=cbp.get('labelpad', 15))
+                
+                # y-limits for residual mode will be set in a general block below (based on members)
             
             # Modify StreamFinder star styling when membership prob is shown
             if showStream:
@@ -1288,27 +1474,13 @@ class StreamPlotter:
                 sf_high_prob_mask = sf_prob_values >= min_prob
                 
                 # Override existing StreamFinder star plots with new styling
-                sf_diamond_params_high = {
-                    'marker': 'D',
-                    's': 40,
-                    'c': sf_prob_values[sf_high_prob_mask],
-                    'cmap': 'viridis',
-                    'norm': norm,
-                    'edgecolor': 'black',
-                    'linewidth': 1,
-                    'alpha': 1.0,
-                    'zorder': 7,
-                }
+                base_high = self.plot_params.get('sf_high_prob_diamond', {})
+                sf_diamond_params_high = {**base_high,
+                                          'c': sf_prob_values[sf_high_prob_mask],
+                                          'cmap': cmap,
+                                          'norm': norm}
                 
-                sf_diamond_params_low = {
-                    'marker': 'D',
-                    's': 40,
-                    'color': 'black',
-                    'edgecolor': 'black',
-                    'linewidth': 1,
-                    'alpha': 1.0,
-                    'zorder': 7,
-                }
+                sf_diamond_params_low = self.plot_params.get('sf_low_prob_diamond', {}).copy()
                 
                 # Get high and low probability SF star indices
                 sf_indices_high = sf_in_desi_indices[sf_high_prob_mask]
@@ -1325,22 +1497,22 @@ class StreamPlotter:
                     )
                     ax[1].scatter(
                         sf_data_high[col_x],
-                        sf_data_high['VGSR'],
+                        (sf_data_high['VGSR'] - preds['sf'].get('vgsr', 0)[:len(sf_data_high)]) if residual_mode else sf_data_high['VGSR'],
                         **{k: v for k, v in sf_diamond_params_high.items() if k != 'label'}
                     )
                     ax[2].scatter(
                         sf_data_high[col_x],
-                        sf_data_high['PMRA'],
+                        (sf_data_high['PMRA'] - preds['sf'].get('pmra', 0)[:len(sf_data_high)]) if residual_mode else sf_data_high['PMRA'],
                         **{k: v for k, v in sf_diamond_params_high.items() if k != 'label'}
                     )
                     ax[3].scatter(
                         sf_data_high[col_x],
-                        sf_data_high['PMDEC'],
+                        (sf_data_high['PMDEC'] - preds['sf'].get('pmdec', 0)[:len(sf_data_high)]) if residual_mode else sf_data_high['PMDEC'],
                         **{k: v for k, v in sf_diamond_params_high.items() if k != 'label'}
                     )
                     ax[4].scatter(
                         sf_data_high[col_x],
-                        sf_data_high['FEH'],
+                        (sf_data_high['FEH'] - preds['sf'].get('feh', 0)[:len(sf_data_high)]) if residual_mode else sf_data_high['FEH'],
                         **{k: v for k, v in sf_diamond_params_high.items() if k != 'label'}
                     )
                 
@@ -1356,32 +1528,58 @@ class StreamPlotter:
                     )
                     ax[1].scatter(
                         sf_data_low[col_x],
-                        sf_data_low['VGSR'],
+                        (sf_data_low['VGSR'] - preds['sf'].get('vgsr', 0)[-len(sf_data_low):]) if residual_mode else sf_data_low['VGSR'],
                         **sf_diamond_params_low
                     )
                     ax[2].scatter(
                         sf_data_low[col_x],
-                        sf_data_low['PMRA'],
+                        (sf_data_low['PMRA'] - preds['sf'].get('pmra', 0)[-len(sf_data_low):]) if residual_mode else sf_data_low['PMRA'],
                         **sf_diamond_params_low
                     )
                     ax[3].scatter(
                         sf_data_low[col_x],
-                        sf_data_low['PMDEC'],
+                        (sf_data_low['PMDEC'] - preds['sf'].get('pmdec', 0)[-len(sf_data_low):]) if residual_mode else sf_data_low['PMDEC'],
                         **sf_diamond_params_low
                     )
                     ax[4].scatter(
                         sf_data_low[col_x],
-                        sf_data_low['FEH'],
+                        (sf_data_low['FEH'] - preds['sf'].get('feh', 0)[-len(sf_data_low):]) if residual_mode else sf_data_low['FEH'],
                         **sf_diamond_params_low
                     )
 
-        # Set y-axis limits based on stream data if available
-        if showStream and hasattr(self.data, 'confirmed_sf_and_desi') and len(self.data.confirmed_sf_and_desi) > 0:
+            # In residuals mode, prefer y-limits based on high-probability member stars
+            # Use member stars for limits whenever probabilities are available (independent of whether they are drawn)
+            if residual_mode and stream_prob is not None:
+                high_prob_mask = stream_prob >= min_prob
+                high_prob_indices = np.where(high_prob_mask)[0]
+                if len(high_prob_indices) > 0:
+                    pad_v = self.plot_params.get('limits', {}).get('residual_pad_vgsr', 20)
+                    pad_pm = self.plot_params.get('limits', {}).get('residual_pad_pm', 2)
+                    pad_feh = self.plot_params.get('limits', {}).get('residual_pad_feh', 0.2)
+                    # Build residual arrays from high-probability members
+                    y1_hp = (self.data.desi_data['VGSR'].iloc[high_prob_indices]
+                             - preds['desi'].get('vgsr', np.zeros(len(self.data.desi_data)))[high_prob_indices]).to_numpy()
+                    y2_hp = (self.data.desi_data['PMRA'].iloc[high_prob_indices]
+                             - preds['desi'].get('pmra', np.zeros(len(self.data.desi_data)))[high_prob_indices]).to_numpy()
+                    y3_hp = (self.data.desi_data['PMDEC'].iloc[high_prob_indices]
+                             - preds['desi'].get('pmdec', np.zeros(len(self.data.desi_data)))[high_prob_indices]).to_numpy()
+                    # Set limits
+                    ax[1].set_ylim(np.nanmin(y1_hp) - pad_v, np.nanmax(y1_hp) + pad_v)
+                    ax[2].set_ylim(np.nanmin(y2_hp) - pad_pm, np.nanmax(y2_hp) + pad_pm)
+                    ax[3].set_ylim(np.nanmin(y3_hp) - pad_pm, np.nanmax(y3_hp) + pad_pm)
+                    if 'FEH' in self.data.desi_data.columns and isinstance(preds['desi'].get('feh', None), np.ndarray):
+                        y4_hp = (self.data.desi_data['FEH'].iloc[high_prob_indices] - preds['desi']['feh'][high_prob_indices]).to_numpy()
+                        ax[4].set_ylim(np.nanmin(y4_hp) - pad_feh, np.nanmax(y4_hp) + pad_feh)
+                    else:
+                        ax[4].set_ylim(-1, 1)
+
+        # Set y-axis limits based on stream data if available (fallback for non-residuals)
+        if (not residual_mode) and showStream and hasattr(self.data, 'confirmed_sf_and_desi') and len(self.data.confirmed_sf_and_desi) > 0:
             # VGSR limits
             vgsr_data = [self.data.confirmed_sf_and_desi['VGSR']]
             if hasattr(self.data, 'cut_confirmed_sf_and_desi') and len(self.data.cut_confirmed_sf_and_desi) > 0 and show_cut:
                 vgsr_data.append(self.data.cut_confirmed_sf_and_desi['VGSR'])
-            vgsr_combined = np.concatenate(vgsr_data)
+            vgsr_combined = np.concatenate([np.array(x) for x in vgsr_data])
             ax[1].set_ylim(np.nanmin(vgsr_combined) - 50, np.nanmax(vgsr_combined) + 50)
             
             # Proper motion limits  
@@ -1390,13 +1588,14 @@ class StreamPlotter:
             if hasattr(self.data, 'cut_confirmed_sf_and_desi') and len(self.data.cut_confirmed_sf_and_desi) > 0 and show_cut:
                 pmra_data.append(self.data.cut_confirmed_sf_and_desi['PMRA'])
                 pmdec_data.append(self.data.cut_confirmed_sf_and_desi['PMDEC'])
-            pmra_combined = np.concatenate(pmra_data)
-            pmdec_combined = np.concatenate(pmdec_data)
+            pmra_combined = np.concatenate([np.array(x) for x in pmra_data])
+            pmdec_combined = np.concatenate([np.array(x) for x in pmdec_data])
             ax[2].set_ylim(np.nanmin(pmra_combined) - 5, np.nanmax(pmra_combined) + 5)
             ax[3].set_ylim(np.nanmin(pmdec_combined) - 5, np.nanmax(pmdec_combined) + 5)
 
-        # Set metallicity limits
-        ax[4].set_ylim(-4, -0.5)
+            # Set metallicity limits (non-residuals default)
+            feh_ylim = self.plot_params.get('limits', {}).get('feh_ylim_default', (-4, -0.5))
+            ax[4].set_ylim(*feh_ylim)
         
         # Plot splines if requested and available
         if (show_initial_splines or show_optimized_splines or show_mcmc_splines) and stream_frame and self.mcmeta is not None:
@@ -1404,6 +1603,30 @@ class StreamPlotter:
             phi1_min = ax[1].get_xlim()[0]
             phi1_max = ax[1].get_xlim()[1]
             phi1_spline_plot = np.linspace(phi1_min, phi1_max, 100)
+            
+        # If optimized splines are requested but optimized_params aren't attached,
+        # try to source them from common places used in the notebook (silently).
+            if show_optimized_splines and (not hasattr(self.mcmeta, 'optimized_params') or self.mcmeta.optimized_params is None):
+                try:
+                    import inspect
+                    sourced = False
+                    # 1) Look for a variable named `optimized_for_plotting` in caller frames
+                    frame = inspect.currentframe()
+                    caller_frame = frame.f_back if frame is not None else None
+                    while caller_frame:
+                        if 'optimized_for_plotting' in caller_frame.f_globals:
+                            ofp = caller_frame.f_globals['optimized_for_plotting']
+                            if ofp is not None:
+                                self.mcmeta.optimized_params = ofp
+                                sourced = True
+                                break
+                        caller_frame = caller_frame.f_back
+                    # 2) Fallback to MCMeta.sp_output (from scipy_optimize)
+                    if not sourced and hasattr(self.mcmeta, 'sp_output') and self.mcmeta.sp_output is not None:
+                        self.mcmeta.optimized_params = self.mcmeta.sp_output
+                        sourced = True
+                except Exception as e:
+                    pass
             
             # Plot initial guess splines in black
             if show_initial_splines:
@@ -1414,53 +1637,113 @@ class StreamPlotter:
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
                             self.mcmeta.initial_params['vgsr_spline_points'], k=2
                         )
-                        ax[1].plot(phi1_spline_plot, vgsr_initial, 'k-', linewidth=2, 
-                                  label='Initial Spline', alpha=0.8)
+                        if 'vgsr_spline_points' in self.mcmeta.initial_params and 'vgsr' in locals():
+                            pass
+                        # Residual vs MCMC if applicable
+                        if 'vgsr_knots' in locals() and 'residual_mode' in locals() and residual_mode:
+                            vgsr_mcmc_eval = stream_funcs.apply_spline(
+                                phi1_spline_plot, self.mcmeta.phi1_spline_points, vgsr_knots, k=2
+                            )
+                            vgsr_initial_plot = vgsr_initial - vgsr_mcmc_eval
+                        else:
+                            vgsr_initial_plot = vgsr_initial
+                        ax[1].plot(
+                            phi1_spline_plot,
+                            vgsr_initial_plot,
+                            **self.plot_params.get('initial_spline_line', {})
+                        )
                         
                         # Add circle markers at spline points
-                        ax[1].scatter(self.mcmeta.phi1_spline_points, 
-                                     self.mcmeta.initial_params['vgsr_spline_points'],
-                                     marker='o', color='black', s=50, zorder=10, alpha=0.8,
-                                     edgecolors='white', linewidth=1)
+                        if 'vgsr_knots' in locals() and residual_mode:
+                            vgsr_mcmc_knots = stream_funcs.apply_spline(
+                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, vgsr_knots, k=2
+                            )
+                            vgsr_init_knots_scatter = self.mcmeta.initial_params['vgsr_spline_points'] - vgsr_mcmc_knots
+                        else:
+                            vgsr_init_knots_scatter = self.mcmeta.initial_params['vgsr_spline_points']
+                        ax[1].scatter(
+                            self.mcmeta.phi1_spline_points,
+                            vgsr_init_knots_scatter,
+                            **self.plot_params.get('spline_knot_initial', {})
+                        )
                         
                         # PMRA spline
                         pmra_initial = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
                             self.mcmeta.initial_params['pmra_spline_points'], k=2
                         )
-                        ax[2].plot(phi1_spline_plot, pmra_initial, 'k-', linewidth=2, 
-                                  label='Initial Spline', alpha=0.8)
+                        if 'pmra_knots' in locals() and 'residual_mode' in locals() and residual_mode:
+                            pmra_mcmc_eval = stream_funcs.apply_spline(
+                                phi1_spline_plot, self.mcmeta.phi1_spline_points, pmra_knots, k=2
+                            )
+                            pmra_initial_plot = pmra_initial - pmra_mcmc_eval
+                        else:
+                            pmra_initial_plot = pmra_initial
+                        ax[2].plot(
+                            phi1_spline_plot,
+                            pmra_initial_plot,
+                            **self.plot_params.get('initial_spline_line', {})
+                        )
                         
                         # Add circle markers at spline points
-                        ax[2].scatter(self.mcmeta.phi1_spline_points, 
-                                     self.mcmeta.initial_params['pmra_spline_points'],
-                                     marker='o', color='black', s=50, zorder=10, alpha=0.8,
-                                     edgecolors='white', linewidth=1)
+                        if 'pmra_knots' in locals() and residual_mode:
+                            pmra_mcmc_knots = stream_funcs.apply_spline(
+                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, pmra_knots, k=2
+                            )
+                            pmra_init_knots_scatter = self.mcmeta.initial_params['pmra_spline_points'] - pmra_mcmc_knots
+                        else:
+                            pmra_init_knots_scatter = self.mcmeta.initial_params['pmra_spline_points']
+                        ax[2].scatter(
+                            self.mcmeta.phi1_spline_points,
+                            pmra_init_knots_scatter,
+                            **self.plot_params.get('spline_knot_initial', {})
+                        )
                         
                         # PMDEC spline
                         pmdec_initial = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
                             self.mcmeta.initial_params['pmdec_spline_points'], k=2
                         )
-                        ax[3].plot(phi1_spline_plot, pmdec_initial, 'k-', linewidth=2, 
-                                  label='Initial Spline', alpha=0.8)
+                        if 'pmdec_knots' in locals() and 'residual_mode' in locals() and residual_mode:
+                            pmdec_mcmc_eval = stream_funcs.apply_spline(
+                                phi1_spline_plot, self.mcmeta.phi1_spline_points, pmdec_knots, k=2
+                            )
+                            pmdec_initial_plot = pmdec_initial - pmdec_mcmc_eval
+                        else:
+                            pmdec_initial_plot = pmdec_initial
+                        ax[3].plot(
+                            phi1_spline_plot,
+                            pmdec_initial_plot,
+                            **self.plot_params.get('initial_spline_line', {})
+                        )
                         
                         # Add circle markers at spline points
-                        ax[3].scatter(self.mcmeta.phi1_spline_points, 
-                                     self.mcmeta.initial_params['pmdec_spline_points'],
-                                     marker='o', color='black', s=50, zorder=10, alpha=0.8,
-                                     edgecolors='white', linewidth=1)
+                        if 'pmdec_knots' in locals() and residual_mode:
+                            pmdec_mcmc_knots = stream_funcs.apply_spline(
+                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, pmdec_knots, k=2
+                            )
+                            pmdec_init_knots_scatter = self.mcmeta.initial_params['pmdec_spline_points'] - pmdec_mcmc_knots
+                        else:
+                            pmdec_init_knots_scatter = self.mcmeta.initial_params['pmdec_spline_points']
+                        ax[3].scatter(
+                            self.mcmeta.phi1_spline_points,
+                            pmdec_init_knots_scatter,
+                            **self.plot_params.get('spline_knot_initial', {})
+                        )
                         
                         # FEH constant line
                         feh_initial = np.full_like(phi1_spline_plot, self.mcmeta.initial_params['feh1'])
-                        ax[4].plot(phi1_spline_plot, feh_initial, 'k-', linewidth=2, 
-                                  label='Initial [Fe/H]', alpha=0.8)
+                        if 'feh_const' in locals() and 'residual_mode' in locals() and residual_mode:
+                            feh_initial_plot = feh_initial - feh_const
+                        else:
+                            feh_initial_plot = feh_initial
+                        ax[4].plot(
+                            phi1_spline_plot,
+                            feh_initial_plot,
+                            **self.plot_params.get('initial_feh_line', {})
+                        )
                         
-                        # Add circle markers at spline points for FEH (constant value)
-                        ax[4].scatter(self.mcmeta.phi1_spline_points, 
-                                     np.full_like(self.mcmeta.phi1_spline_points, self.mcmeta.initial_params['feh1']),
-                                     marker='o', color='black', s=50, zorder=10, alpha=0.8,
-                                     edgecolors='white', linewidth=1)
+                        # No FEH spline markers on metallicity panel (line only)
                     except Exception as e:
                         print(f"Warning: Could not plot initial splines: {e}")
             
@@ -1473,53 +1756,110 @@ class StreamPlotter:
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
                             self.mcmeta.optimized_params['vgsr_spline_points'], k=2
                         )
-                        ax[1].plot(phi1_spline_plot, vgsr_optimized, 'r-', linewidth=2, 
-                                  label='Optimized Spline', alpha=0.8)
+                        if 'vgsr_knots' in locals() and 'residual_mode' in locals() and residual_mode:
+                            vgsr_mcmc_eval = stream_funcs.apply_spline(
+                                phi1_spline_plot, self.mcmeta.phi1_spline_points, vgsr_knots, k=2
+                            )
+                            vgsr_optimized_plot = vgsr_optimized - vgsr_mcmc_eval
+                        else:
+                            vgsr_optimized_plot = vgsr_optimized
+                        ax[1].plot(
+                            phi1_spline_plot,
+                            vgsr_optimized_plot,
+                            **self.plot_params.get('optimized_spline_line', {})
+                        )
                         
                         # Add circle markers at spline points
-                        ax[1].scatter(self.mcmeta.phi1_spline_points, 
-                                     self.mcmeta.optimized_params['vgsr_spline_points'],
-                                     marker='o', color='red', s=50, zorder=10, alpha=0.8,
-                                     edgecolors='white', linewidth=1)
+                        if 'vgsr_knots' in locals() and 'residual_mode' in locals() and residual_mode:
+                            vgsr_mcmc_knots = stream_funcs.apply_spline(
+                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, vgsr_knots, k=2
+                            )
+                            vgsr_knots_scatter = self.mcmeta.optimized_params['vgsr_spline_points'] - vgsr_mcmc_knots
+                        else:
+                            vgsr_knots_scatter = self.mcmeta.optimized_params['vgsr_spline_points']
+                        ax[1].scatter(
+                            self.mcmeta.phi1_spline_points,
+                            vgsr_knots_scatter,
+                            **self.plot_params.get('spline_knot_optimized', {})
+                        )
                         
                         # PMRA spline
                         pmra_optimized = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
                             self.mcmeta.optimized_params['pmra_spline_points'], k=2
                         )
-                        ax[2].plot(phi1_spline_plot, pmra_optimized, 'r-', linewidth=2, 
-                                  label='Optimized Spline', alpha=0.8)
+                        if 'pmra_knots' in locals() and 'residual_mode' in locals() and residual_mode:
+                            pmra_mcmc_eval = stream_funcs.apply_spline(
+                                phi1_spline_plot, self.mcmeta.phi1_spline_points, pmra_knots, k=2
+                            )
+                            pmra_optimized_plot = pmra_optimized - pmra_mcmc_eval
+                        else:
+                            pmra_optimized_plot = pmra_optimized
+                        ax[2].plot(
+                            phi1_spline_plot,
+                            pmra_optimized_plot,
+                            **self.plot_params.get('optimized_spline_line', {})
+                        )
                         
                         # Add circle markers at spline points
-                        ax[2].scatter(self.mcmeta.phi1_spline_points, 
-                                     self.mcmeta.optimized_params['pmra_spline_points'],
-                                     marker='o', color='red', s=50, zorder=10, alpha=0.8,
-                                     edgecolors='white', linewidth=1)
+                        if 'pmra_knots' in locals() and 'residual_mode' in locals() and residual_mode:
+                            pmra_mcmc_knots = stream_funcs.apply_spline(
+                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, pmra_knots, k=2
+                            )
+                            pmra_knots_scatter = self.mcmeta.optimized_params['pmra_spline_points'] - pmra_mcmc_knots
+                        else:
+                            pmra_knots_scatter = self.mcmeta.optimized_params['pmra_spline_points']
+                        ax[2].scatter(
+                            self.mcmeta.phi1_spline_points,
+                            pmra_knots_scatter,
+                            **self.plot_params.get('spline_knot_optimized', {})
+                        )
                         
                         # PMDEC spline
                         pmdec_optimized = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
                             self.mcmeta.optimized_params['pmdec_spline_points'], k=2
                         )
-                        ax[3].plot(phi1_spline_plot, pmdec_optimized, 'r-', linewidth=2, 
-                                  label='Optimized Spline', alpha=0.8)
+                        if 'pmdec_knots' in locals() and 'residual_mode' in locals() and residual_mode:
+                            pmdec_mcmc_eval = stream_funcs.apply_spline(
+                                phi1_spline_plot, self.mcmeta.phi1_spline_points, pmdec_knots, k=2
+                            )
+                            pmdec_optimized_plot = pmdec_optimized - pmdec_mcmc_eval
+                        else:
+                            pmdec_optimized_plot = pmdec_optimized
+                        ax[3].plot(
+                            phi1_spline_plot,
+                            pmdec_optimized_plot,
+                            **self.plot_params.get('optimized_spline_line', {})
+                        )
                         
                         # Add circle markers at spline points
-                        ax[3].scatter(self.mcmeta.phi1_spline_points, 
-                                     self.mcmeta.optimized_params['pmdec_spline_points'],
-                                     marker='o', color='red', s=50, zorder=10, alpha=0.8,
-                                     edgecolors='white', linewidth=1)
+                        if 'pmdec_knots' in locals() and 'residual_mode' in locals() and residual_mode:
+                            pmdec_mcmc_knots = stream_funcs.apply_spline(
+                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, pmdec_knots, k=2
+                            )
+                            pmdec_knots_scatter = self.mcmeta.optimized_params['pmdec_spline_points'] - pmdec_mcmc_knots
+                        else:
+                            pmdec_knots_scatter = self.mcmeta.optimized_params['pmdec_spline_points']
+                        ax[3].scatter(
+                            self.mcmeta.phi1_spline_points,
+                            pmdec_knots_scatter,
+                            **self.plot_params.get('spline_knot_optimized', {})
+                        )
                         
                         # FEH constant line
                         feh_optimized = np.full_like(phi1_spline_plot, self.mcmeta.optimized_params['feh1'])
-                        ax[4].plot(phi1_spline_plot, feh_optimized, 'r-', linewidth=2, 
-                                  label='Optimized [Fe/H]', alpha=0.8)
+                        if 'feh_const' in locals() and 'residual_mode' in locals() and residual_mode:
+                            feh_optimized_plot = feh_optimized - feh_const
+                        else:
+                            feh_optimized_plot = feh_optimized
+                        ax[4].plot(
+                            phi1_spline_plot,
+                            feh_optimized_plot,
+                            **self.plot_params.get('optimized_feh_line', {})
+                        )
                         
-                        # Add circle markers at spline points for FEH (constant value)
-                        ax[4].scatter(self.mcmeta.phi1_spline_points, 
-                                     np.full_like(self.mcmeta.phi1_spline_points, self.mcmeta.optimized_params['feh1']),
-                                     marker='o', color='red', s=50, zorder=10, alpha=0.8,
-                                     edgecolors='white', linewidth=1)
+                        # No FEH spline markers on metallicity panel (line only)
                     except Exception as e:
                         print(f"Warning: Could not plot optimized splines: {e}")
             
@@ -1574,8 +1914,11 @@ class StreamPlotter:
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
                             vgsr_mcmc_points, k=2
                         )
-                        ax[1].plot(phi1_spline_plot, vgsr_mcmc, 'b-', linewidth=2, 
-                                  label='MCMC Spline', alpha=0.8)
+                        if residual_mode:
+                            ax[1].axhline(0, color='blue', linewidth=2, alpha=0.8, label='MCMC Spline (resid)')
+                        else:
+                            ax[1].plot(phi1_spline_plot, vgsr_mcmc, 'b-', linewidth=2, 
+                                      label='MCMC Spline', alpha=0.8)
                         
                         # Extract error bars for VGSR spline points
                         try:
@@ -1594,13 +1937,15 @@ class StreamPlotter:
                                     vgsr_mcmc_errors.append([0, 0])
                             
                             vgsr_mcmc_errors = np.array(vgsr_mcmc_errors).T
-                            ax[1].errorbar(self.mcmeta.phi1_spline_points, vgsr_mcmc_points, 
+                            yvals = np.zeros_like(self.mcmeta.phi1_spline_points) if residual_mode else vgsr_mcmc_points
+                            ax[1].errorbar(self.mcmeta.phi1_spline_points, yvals, 
                                           yerr=vgsr_mcmc_errors, fmt='o', color='blue', 
                                           markersize=8, zorder=10, alpha=0.8, markeredgecolor='white', 
                                           markeredgewidth=1, capsize=3, capthick=1.5, elinewidth=1.5)
                         except:
                             # Fallback to simple markers without error bars
-                            ax[1].scatter(self.mcmeta.phi1_spline_points, vgsr_mcmc_points,
+                            yvals = np.zeros_like(self.mcmeta.phi1_spline_points) if residual_mode else vgsr_mcmc_points
+                            ax[1].scatter(self.mcmeta.phi1_spline_points, yvals,
                                          marker='o', color='blue', s=50, zorder=10, alpha=0.8,
                                          edgecolors='white', linewidth=1)
                         
@@ -1609,8 +1954,11 @@ class StreamPlotter:
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
                             pmra_mcmc_points, k=2
                         )
-                        ax[2].plot(phi1_spline_plot, pmra_mcmc, 'b-', linewidth=2, 
-                                  label='MCMC Spline', alpha=0.8)
+                        if residual_mode:
+                            ax[2].axhline(0, color='blue', linewidth=2, alpha=0.8, label='MCMC Spline (resid)')
+                        else:
+                            ax[2].plot(phi1_spline_plot, pmra_mcmc, 'b-', linewidth=2, 
+                                      label='MCMC Spline', alpha=0.8)
                         
                         # Extract error bars for PMRA spline points
                         try:
@@ -1628,13 +1976,15 @@ class StreamPlotter:
                                     pmra_mcmc_errors.append([0, 0])
                             
                             pmra_mcmc_errors = np.array(pmra_mcmc_errors).T
-                            ax[2].errorbar(self.mcmeta.phi1_spline_points, pmra_mcmc_points, 
+                            yvals = np.zeros_like(self.mcmeta.phi1_spline_points) if residual_mode else pmra_mcmc_points
+                            ax[2].errorbar(self.mcmeta.phi1_spline_points, yvals, 
                                           yerr=pmra_mcmc_errors, fmt='o', color='blue', 
                                           markersize=8, zorder=10, alpha=0.8, markeredgecolor='white', 
                                           markeredgewidth=1, capsize=3, capthick=1.5, elinewidth=1.5)
                         except:
                             # Fallback to simple markers without error bars
-                            ax[2].scatter(self.mcmeta.phi1_spline_points, pmra_mcmc_points,
+                            yvals = np.zeros_like(self.mcmeta.phi1_spline_points) if residual_mode else pmra_mcmc_points
+                            ax[2].scatter(self.mcmeta.phi1_spline_points, yvals,
                                          marker='o', color='blue', s=50, zorder=10, alpha=0.8,
                                          edgecolors='white', linewidth=1)
                         
@@ -1643,8 +1993,11 @@ class StreamPlotter:
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
                             pmdec_mcmc_points, k=2
                         )
-                        ax[3].plot(phi1_spline_plot, pmdec_mcmc, 'b-', linewidth=2, 
-                                  label='MCMC Spline', alpha=0.8)
+                        if residual_mode:
+                            ax[3].axhline(0, color='blue', linewidth=2, alpha=0.8, label='MCMC Spline (resid)')
+                        else:
+                            ax[3].plot(phi1_spline_plot, pmdec_mcmc, 'b-', linewidth=2, 
+                                      label='MCMC Spline', alpha=0.8)
                         
                         # Extract error bars for PMDEC spline points
                         try:
@@ -1662,47 +2015,27 @@ class StreamPlotter:
                                     pmdec_mcmc_errors.append([0, 0])
                             
                             pmdec_mcmc_errors = np.array(pmdec_mcmc_errors).T
-                            ax[3].errorbar(self.mcmeta.phi1_spline_points, pmdec_mcmc_points, 
+                            yvals = np.zeros_like(self.mcmeta.phi1_spline_points) if residual_mode else pmdec_mcmc_points
+                            ax[3].errorbar(self.mcmeta.phi1_spline_points, yvals, 
                                           yerr=pmdec_mcmc_errors, fmt='o', color='blue', 
                                           markersize=8, zorder=10, alpha=0.8, markeredgecolor='white', 
                                           markeredgewidth=1, capsize=3, capthick=1.5, elinewidth=1.5)
                         except:
                             # Fallback to simple markers without error bars
-                            ax[3].scatter(self.mcmeta.phi1_spline_points, pmdec_mcmc_points,
+                            yvals = np.zeros_like(self.mcmeta.phi1_spline_points) if residual_mode else pmdec_mcmc_points
+                            ax[3].scatter(self.mcmeta.phi1_spline_points, yvals,
                                          marker='o', color='blue', s=50, zorder=10, alpha=0.8,
                                          edgecolors='white', linewidth=1)
                         
                         # FEH constant line
                         feh_mcmc = np.full_like(phi1_spline_plot, meds['feh1'])
-                        ax[4].plot(phi1_spline_plot, feh_mcmc, 'b-', linewidth=2, 
-                                  label='MCMC [Fe/H]', alpha=0.8)
+                        if residual_mode:
+                            ax[4].axhline(0, color='blue', linewidth=2, alpha=0.8, label='MCMC [Fe/H] (resid)')
+                        else:
+                            ax[4].plot(phi1_spline_plot, feh_mcmc, 'b-', linewidth=2, 
+                                      label='MCMC [Fe/H]', alpha=0.8)
                         
-                        # Extract error bars for FEH (constant value)
-                        try:
-                            if 'feh1' in caller_frame.f_globals.get('ep', {}) and 'feh1' in caller_frame.f_globals.get('em', {}):
-                                feh_ep = caller_frame.f_globals['ep']['feh1']
-                                feh_em = caller_frame.f_globals['em']['feh1']
-                                feh_yerr = [[feh_em] * len(self.mcmeta.phi1_spline_points), 
-                                           [feh_ep] * len(self.mcmeta.phi1_spline_points)]
-                            elif 'feh1' in caller_frame.f_locals.get('ep', {}) and 'feh1' in caller_frame.f_locals.get('em', {}):
-                                feh_ep = caller_frame.f_locals['ep']['feh1']
-                                feh_em = caller_frame.f_locals['em']['feh1']
-                                feh_yerr = [[feh_em] * len(self.mcmeta.phi1_spline_points), 
-                                           [feh_ep] * len(self.mcmeta.phi1_spline_points)]
-                            else:
-                                raise KeyError("FEH errors not found")
-                            
-                            ax[4].errorbar(self.mcmeta.phi1_spline_points, 
-                                          np.full_like(self.mcmeta.phi1_spline_points, meds['feh1']), 
-                                          yerr=feh_yerr, fmt='o', color='blue', 
-                                          markersize=8, zorder=10, alpha=0.8, markeredgecolor='white', 
-                                          markeredgewidth=1, capsize=3, capthick=1.5, elinewidth=1.5)
-                        except:
-                            # Fallback to simple markers without error bars
-                            ax[4].scatter(self.mcmeta.phi1_spline_points, 
-                                         np.full_like(self.mcmeta.phi1_spline_points, meds['feh1']),
-                                         marker='o', color='blue', s=50, zorder=10, alpha=0.8,
-                                         edgecolors='white', linewidth=1)
+                        # No FEH spline point markers or error bars on metallicity panel (line only)
                                   
                     finally:
                         del frame
@@ -1720,10 +2053,10 @@ class StreamPlotter:
         
         ax[0].legend(loc='upper left', ncol=4)
         ax[0].set_ylabel(label_y0)
-        ax[1].set_ylabel(r'V$_{GSR}$ (km/s)')
-        ax[2].set_ylabel(r'$\mu_{\alpha}$ [mas/yr]')
-        ax[3].set_ylabel(r'$\mu_{\delta}$ [mas/yr]')
-        ax[4].set_ylabel(r'[Fe/H]')
+        ax[1].set_ylabel(r'V$_{GSR}$ (km/s)' if not residual_mode else r'V$_{GSR}$ - v$_{\rm MCMC}$ (km/s)')
+        ax[2].set_ylabel(r'$\mu_{\alpha}$ [mas/yr]' if not residual_mode else r'$\mu_{\alpha}$ - $\mu_{\alpha,\rm MCMC}$ [mas/yr]')
+        ax[3].set_ylabel(r'$\mu_{\delta}$ [mas/yr]' if not residual_mode else r'$\mu_{\delta}$ - $\mu_{\delta,\rm MCMC}$ [mas/yr]')
+        ax[4].set_ylabel(r'[Fe/H]' if not residual_mode else r'[Fe/H] - [Fe/H]$_{\rm MCMC}$')
         ax[-1].set_xlabel(label_x)
         
         for a in ax:
@@ -2064,14 +2397,16 @@ class MCMeta:
             reshape_arr_shape=self.array_lengths,
             vgsr_trunc=self.vgsr_trunc, feh_trunc=self.feh_trunc, 
             pmra_trunc=self.pmra_trunc, pmdec_trunc=self.pmdec_trunc
-)
-    # Run optimization
+        )
+        # Run optimization
         print("Running optimization...")
         self.sp_result = sp.optimize.minimize(optfunc, self.flat_p0_guess, method="Nelder-Mead")
         print(self.sp_result.message)
 
         self.reshaped_result = stream_funcs.reshape_arr(self.sp_result.x, self.array_lengths)
         self.sp_output = stream_funcs.get_paramdict(self.reshaped_result, labels=self.param_labels)
+        # Make optimized parameters available for plotting/debugging
+        self.optimized_params = self.sp_output
 
         print("\nOptimized Parameters:")
         for label, value in self.sp_output.items():
