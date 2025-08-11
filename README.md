@@ -123,7 +123,7 @@ Koposov, S. E., Li, T. S., Allende Prieto, C., Medina, G. E., Sandford, N., Agua
 Mateu, C. (2023). galstreams: A library of Milky Way stellar stream footprints and tracks. Monthly Notices of the Royal Astronomical Society, 520(4), 5225–5258. https://doi.org/10.1093/mnras/stad321
 
 # Acknowlegements
-![alt text](/DESI-DR1_streamTutorial/img_examples/desi.png)
+![alt text](img_examples/desi.png)
 
 <img src="img_examples/LSST.png" alt="LSST logo" width="250">
 
