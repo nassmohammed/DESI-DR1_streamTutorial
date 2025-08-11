@@ -85,6 +85,8 @@ Read [here](https://data.desi.lbl.gov/doc/releases/dr1/vac/mws/) for a general o
 
 If space is a concern for your device, contact `ting [dot] li [at] astro [dot] utoronto [dot] ca` to get set up on the Eridanus server (Only for participants at the 2025 EXPLORE summer school and research workshop at York University).
 
+**W.I.P.** Google collab notebook for running on weaker laptops.
+
 ### Install Python Environment
 In your cloned directory, run the following in your terminal:
 ```shell
