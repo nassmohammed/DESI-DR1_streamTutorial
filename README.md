@@ -93,7 +93,23 @@ conda env create -f env.yml
 This will set up the proper python environment to run this notebook.
 
 ## User tips & FAQ
-W.I.P.
+### Plotting options
+`background = True` option: show the background stars in the figure for reference.
+
+`showStream = True` option: show STREAMFINDER stars, both those that have survived the cuts so far (as diaminds) and those cut out (as Xs)
+`show_sf_only=False` option: shows STREAMFINDER stars that are NOT IN DESI as hollow diamonds. Useful when there are very few surviving SF stars in DESI
+
+`show_initial(\optimized\mcmc)_splines = True` option: shows the respective spline track ontop of figure.
+
+`plot_params`: A dictionary that allows you to change plotting properties withing adjusting the .py file.
+
+Example usage:
+```python
+plt_kin.plot_params['sf_in_desi']['alpha'] = 0.5
+plt_kin.plot_params['sf_in_desi']['zorder'] = 10
+plt_kin.plot_params['background']['alpha'] = 0.2
+plt_kin.plot_params['background']['s'] = 1
+```
 
 
 # Bibliography
