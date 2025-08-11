@@ -113,6 +113,17 @@ plt_kin.plot_params['background']['alpha'] = 0.2
 plt_kin.plot_params['background']['s'] = 1
 ```
 
+### Q: I don't see a stream in the kinematic plots, should I run the MCMC anyway?
+A: Don't waste your time! If you have difficulty spotting a stream in the trimmed data, so will the MCMC walkers. Try to adjust your cuts and compare with the location of SF stars. 
+
+### Q: How long will it take to run the MCMC?
+A: It depends on your device. If you're set up on the Eridanus server, 5000 burn ins with 5000 iterations will take about 20 miuntes. On google collab, it takes about an hour. On an M3 Macbook pro it takes about 6 minutes.
+
+### Q: How do I know if the MCMC found anything?
+A: We print out some diagonstic plots to judge how well the MCMC did. First the chains are plotted, if it looks like they are hitting up against an invisible wall, your prior may be too restrictive! If it seems to never converge about one value, your priors may be too loose, or there may not be a stream there at all.
+
+The second diagnostic plot is the corner plot. Your MCMC found something if the plots are generally symmetric about the means and have well-defined distributions.
+
 
 # Bibliography
 

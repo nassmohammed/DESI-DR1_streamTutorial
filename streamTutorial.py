@@ -1097,7 +1097,7 @@ class StreamPlotter:
 
     def sixD_plot(self, showStream=True, show_sf_only=False, background=True, save=False, stream_frame=True, galstream=False, show_cut=False, 
                   show_initial_splines=False, show_optimized_splines=False, show_mcmc_splines=False, show_sf_errors=True, 
-                  show_membership_prob=False, stream_prob=None, min_prob=0.5, show_residuals=False):
+                  show_membership_prob=False, stream_prob=None, min_prob=0.5, show_residuals=False, mcmc_object=None):
         """
         Plots the stream phi1 vs phi2, vgsr, pmra, pmdec, and feh
         
@@ -1139,23 +1139,12 @@ class StreamPlotter:
         # Residuals mode prep (only applicable with MCMC splines in stream frame)
         residual_mode = False
         preds = {'desi': {}, 'sf': {}, 'sf_cut': {}, 'sf_only': {}}
+        if mcmc_object is not None:
+                meds = mcmc_object.meds
+                ep = mcmc_object.ep
+                em = mcmc_object.em
         if show_residuals and show_mcmc_splines and stream_frame and hasattr(self, 'mcmeta') and self.mcmeta is not None and hasattr(self.mcmeta, 'phi1_spline_points'):
             try:
-                import inspect
-                frame = inspect.currentframe()
-                meds = None
-                caller_frame = frame.f_back
-                while caller_frame:
-                    if 'meds' in caller_frame.f_globals:
-                        meds = caller_frame.f_globals['meds']
-                        break
-                    if 'meds' in caller_frame.f_locals:
-                        meds = caller_frame.f_locals['meds']
-                        break
-                    caller_frame = caller_frame.f_back
-                del frame
-                if meds is None:
-                    raise NameError('meds not found in calling context')
 
                 npts = len(self.mcmeta.phi1_spline_points)
                 vgsr_knots = np.array([meds[f'vgsr{i}'] for i in range(1, npts+1)])
@@ -1547,6 +1536,49 @@ class StreamPlotter:
                         **sf_diamond_params_low
                     )
 
+        # Set consistent x-axis limits for all panels based on the data being plotted
+        phi1_values_for_limits = []
+        
+        # Collect phi1 values from data sources that are actually being plotted
+        if background and len(self.data.desi_data) > 0:
+            phi1_values_for_limits.extend(self.data.desi_data[col_x].values)
+        if showStream and hasattr(self.data, 'confirmed_sf_and_desi') and len(self.data.confirmed_sf_and_desi) > 0:
+            phi1_values_for_limits.extend(self.data.confirmed_sf_and_desi[col_x].values)
+        if show_sf_only and hasattr(self.data, 'confirmed_sf_not_desi') and len(self.data.confirmed_sf_not_desi) > 0:
+            phi1_values_for_limits.extend(self.data.confirmed_sf_not_desi[col_x_].values)
+        if hasattr(self.data, 'cut_confirmed_sf_and_desi') and show_cut and len(self.data.cut_confirmed_sf_and_desi) > 0:
+            phi1_values_for_limits.extend(self.data.cut_confirmed_sf_and_desi[col_x].values)
+        
+        # Prefer member stars for x-limits if membership probabilities are available
+        if show_membership_prob and stream_prob is not None:
+            high_prob_mask = stream_prob >= min_prob
+            high_prob_indices = np.where(high_prob_mask)[0]
+            if len(high_prob_indices) > 0:
+                # Get phi1 range from high probability member stars
+                high_prob_phi1 = self.data.desi_data[col_x].iloc[high_prob_indices]
+                phi1_min_members = high_prob_phi1.min()
+                phi1_max_members = high_prob_phi1.max()
+                
+                # Add some padding
+                phi1_range_members = phi1_max_members - phi1_min_members
+                phi1_padding = 0.05 * phi1_range_members if phi1_range_members > 0 else 1.0
+                x_limits = (phi1_min_members - phi1_padding, phi1_max_members + phi1_padding)
+                
+                # Apply consistent x-limits to all panels
+                for panel_ax in ax:
+                    panel_ax.set_xlim(x_limits)
+        elif phi1_values_for_limits:
+            # Use all plotted data for x-limits if no membership probabilities
+            phi1_min_data = np.min(phi1_values_for_limits)
+            phi1_max_data = np.max(phi1_values_for_limits)
+            phi1_range_data = phi1_max_data - phi1_min_data
+            phi1_padding = 0.02 * phi1_range_data if phi1_range_data > 0 else 1.0
+            x_limits = (phi1_min_data - phi1_padding, phi1_max_data + phi1_padding)
+            
+            # Apply consistent x-limits to all panels
+            for panel_ax in ax:
+                panel_ax.set_xlim(x_limits)
+
             # In residuals mode, prefer y-limits based on high-probability member stars
             # Use member stars for limits whenever probabilities are available (independent of whether they are drawn)
             if residual_mode and stream_prob is not None:
@@ -1599,10 +1631,38 @@ class StreamPlotter:
         
         # Plot splines if requested and available
         if (show_initial_splines or show_optimized_splines or show_mcmc_splines) and stream_frame and self.mcmeta is not None:
-            # Create phi1 range for spline plotting
-            phi1_min = ax[1].get_xlim()[0]
-            phi1_max = ax[1].get_xlim()[1]
-            phi1_spline_plot = np.linspace(phi1_min, phi1_max, 100)
+            # Create phi1 range for spline plotting based on data range, not current axis limits
+            phi1_values = []
+            
+            # Collect phi1 values from all data sources that will be plotted
+            if background and len(self.data.desi_data) > 0:
+                phi1_values.extend(self.data.desi_data[col_x].values)
+            if showStream and hasattr(self.data, 'confirmed_sf_and_desi') and len(self.data.confirmed_sf_and_desi) > 0:
+                phi1_values.extend(self.data.confirmed_sf_and_desi[col_x].values)
+            if show_sf_only and hasattr(self.data, 'confirmed_sf_not_desi') and len(self.data.confirmed_sf_not_desi) > 0:
+                phi1_values.extend(self.data.confirmed_sf_not_desi[col_x_].values)
+            if hasattr(self.data, 'cut_confirmed_sf_and_desi') and show_cut and len(self.data.cut_confirmed_sf_and_desi) > 0:
+                phi1_values.extend(self.data.cut_confirmed_sf_and_desi[col_x].values)
+            
+            # Also include membership probability data if it's being shown
+            if show_membership_prob and stream_prob is not None:
+                # Always include the full DESI dataset range when showing membership probabilities
+                phi1_values.extend(self.data.desi_data[col_x].values)
+            
+            # If we have phi1 values, use them to determine the range, otherwise fall back to axis limits
+            if phi1_values:
+                phi1_min = np.min(phi1_values)
+                phi1_max = np.max(phi1_values)
+                # Add some padding to ensure we cover the full range
+                phi1_range = phi1_max - phi1_min
+                phi1_min -= 0.1 * phi1_range
+                phi1_max += 0.1 * phi1_range
+            else:
+                # Fallback to current axis limits if no data available
+                phi1_min = ax[1].get_xlim()[0]
+                phi1_max = ax[1].get_xlim()[1]
+            
+            phi1_spline_plot = np.linspace(phi1_min, phi1_max, 200)  # Increased resolution
             
         # If optimized splines are requested but optimized_params aren't attached,
         # try to source them from common places used in the notebook (silently).
@@ -1865,24 +1925,7 @@ class StreamPlotter:
             
             # Plot MCMC splines in blue (requires external meds dictionary with MCMC results)
             if show_mcmc_splines and hasattr(self.mcmeta, 'phi1_spline_points'):
-                try:
-                    # Try to access meds from the global namespace or pass it as parameter
-                    # This is a bit of a hack - in a proper implementation you'd pass meds as a parameter
-                    import inspect
-                    frame = inspect.currentframe()
-                    try:
-                        # Look for meds in the calling frame's globals
-                        caller_frame = frame.f_back
-                        while caller_frame:
-                            if 'meds' in caller_frame.f_globals:
-                                meds = caller_frame.f_globals['meds']
-                                break
-                            elif 'meds' in caller_frame.f_locals:
-                                meds = caller_frame.f_locals['meds']
-                                break
-                            caller_frame = caller_frame.f_back
-                        else:
-                            raise NameError("meds not found in calling context")
+                        
                             
                         # Extract spline points from meds dictionary
                         no_of_spline_points = len(self.mcmeta.phi1_spline_points)
@@ -1920,35 +1963,31 @@ class StreamPlotter:
                             ax[1].plot(phi1_spline_plot, vgsr_mcmc, 'b-', linewidth=2, 
                                       label='MCMC Spline', alpha=0.8)
                         
-                        # Extract error bars for VGSR spline points
-                        try:
-                            # Get error estimates - look for ep/em variables in calling context
-                            vgsr_mcmc_errors = []
-                            for i in range(1, no_of_spline_points + 1):
-                                if f'vgsr{i}' in caller_frame.f_globals.get('ep', {}) and f'vgsr{i}' in caller_frame.f_globals.get('em', {}):
-                                    ep_val = caller_frame.f_globals['ep'][f'vgsr{i}']
-                                    em_val = caller_frame.f_globals['em'][f'vgsr{i}']
-                                    vgsr_mcmc_errors.append([em_val, ep_val])
-                                elif f'vgsr{i}' in caller_frame.f_locals.get('ep', {}) and f'vgsr{i}' in caller_frame.f_locals.get('em', {}):
-                                    ep_val = caller_frame.f_locals['ep'][f'vgsr{i}']
-                                    em_val = caller_frame.f_locals['em'][f'vgsr{i}']
-                                    vgsr_mcmc_errors.append([em_val, ep_val])
-                                else:
-                                    vgsr_mcmc_errors.append([0, 0])
-                            
-                            vgsr_mcmc_errors = np.array(vgsr_mcmc_errors).T
-                            yvals = np.zeros_like(self.mcmeta.phi1_spline_points) if residual_mode else vgsr_mcmc_points
-                            ax[1].errorbar(self.mcmeta.phi1_spline_points, yvals, 
-                                          yerr=vgsr_mcmc_errors, fmt='o', color='blue', 
-                                          markersize=8, zorder=10, alpha=0.8, markeredgecolor='white', 
-                                          markeredgewidth=1, capsize=3, capthick=1.5, elinewidth=1.5)
-                        except:
-                            # Fallback to simple markers without error bars
-                            yvals = np.zeros_like(self.mcmeta.phi1_spline_points) if residual_mode else vgsr_mcmc_points
-                            ax[1].scatter(self.mcmeta.phi1_spline_points, yvals,
-                                         marker='o', color='blue', s=50, zorder=10, alpha=0.8,
-                                         edgecolors='white', linewidth=1)
+                        # Plot 1 sigma and 2 sigma regions covering full spline length
+                        sigma_vgsr = 10**meds['lsigvgsr']
+                        print(phi1_spline_plot.min())
+                        if residual_mode:
+                            ax[1].fill_between(phi1_spline_plot, -sigma_vgsr, +sigma_vgsr, color='blue', alpha=0.1)
+                            ax[1].fill_between(phi1_spline_plot, -2*sigma_vgsr, +2*sigma_vgsr, color='blue', alpha=0.05)
+                        else:
+                            ax[1].fill_between(phi1_spline_plot, vgsr_mcmc - sigma_vgsr, vgsr_mcmc + sigma_vgsr, color='blue', alpha=0.1)
+                            ax[1].fill_between(phi1_spline_plot, vgsr_mcmc - 2*sigma_vgsr, vgsr_mcmc + 2*sigma_vgsr, color='blue', alpha=0.05)
+
+                        vgsr_mcmc_ep = []
+                        for i in range(1, no_of_spline_points + 1):
+                            vgsr_mcmc_ep.append(ep['vgsr'+str(i)])
+
+                        vgsr_mcmc_em = []
+                        for i in range(1, no_of_spline_points + 1):
+                            vgsr_mcmc_em.append(np.abs(em['vgsr'+str(i)]))
                         
+                        vgsr_mcmc_errors = np.array([vgsr_mcmc_em, vgsr_mcmc_ep])
+                        yvals = np.zeros_like(self.mcmeta.phi1_spline_points) if residual_mode else vgsr_mcmc_points
+                        ax[1].errorbar(self.mcmeta.phi1_spline_points, yvals, 
+                                        yerr=vgsr_mcmc_errors, fmt='o', color='blue', 
+                                        markersize=8, zorder=10, alpha=0.8, markeredgecolor='white', 
+                                        markeredgewidth=1, capsize=3, capthick=1.5, elinewidth=1.5)
+
                         # PMRA spline
                         pmra_mcmc = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
@@ -1960,33 +1999,31 @@ class StreamPlotter:
                             ax[2].plot(phi1_spline_plot, pmra_mcmc, 'b-', linewidth=2, 
                                       label='MCMC Spline', alpha=0.8)
                         
+                        # Plot 1 sigma and 2 sigma regions for PMRA
+                        sigma_pmra = 10**meds['lsigpmra']
+                        if residual_mode:
+                            ax[2].fill_between(phi1_spline_plot, -sigma_pmra, +sigma_pmra, color='blue', alpha=0.1)
+                            ax[2].fill_between(phi1_spline_plot, -2*sigma_pmra, +2*sigma_pmra, color='blue', alpha=0.05)
+                        else:
+                            ax[2].fill_between(phi1_spline_plot, pmra_mcmc - sigma_pmra, pmra_mcmc + sigma_pmra, color='blue', alpha=0.1)
+                            ax[2].fill_between(phi1_spline_plot, pmra_mcmc - 2*sigma_pmra, pmra_mcmc + 2*sigma_pmra, color='blue', alpha=0.05)
+
                         # Extract error bars for PMRA spline points
-                        try:
-                            pmra_mcmc_errors = []
-                            for i in range(1, no_of_spline_points + 1):
-                                if f'pmra{i}' in caller_frame.f_globals.get('ep', {}) and f'pmra{i}' in caller_frame.f_globals.get('em', {}):
-                                    ep_val = caller_frame.f_globals['ep'][f'pmra{i}']
-                                    em_val = caller_frame.f_globals['em'][f'pmra{i}']
-                                    pmra_mcmc_errors.append([em_val, ep_val])
-                                elif f'pmra{i}' in caller_frame.f_locals.get('ep', {}) and f'pmra{i}' in caller_frame.f_locals.get('em', {}):
-                                    ep_val = caller_frame.f_locals['ep'][f'pmra{i}']
-                                    em_val = caller_frame.f_locals['em'][f'pmra{i}']
-                                    pmra_mcmc_errors.append([em_val, ep_val])
-                                else:
-                                    pmra_mcmc_errors.append([0, 0])
-                            
-                            pmra_mcmc_errors = np.array(pmra_mcmc_errors).T
-                            yvals = np.zeros_like(self.mcmeta.phi1_spline_points) if residual_mode else pmra_mcmc_points
-                            ax[2].errorbar(self.mcmeta.phi1_spline_points, yvals, 
-                                          yerr=pmra_mcmc_errors, fmt='o', color='blue', 
-                                          markersize=8, zorder=10, alpha=0.8, markeredgecolor='white', 
-                                          markeredgewidth=1, capsize=3, capthick=1.5, elinewidth=1.5)
-                        except:
-                            # Fallback to simple markers without error bars
-                            yvals = np.zeros_like(self.mcmeta.phi1_spline_points) if residual_mode else pmra_mcmc_points
-                            ax[2].scatter(self.mcmeta.phi1_spline_points, yvals,
-                                         marker='o', color='blue', s=50, zorder=10, alpha=0.8,
-                                         edgecolors='white', linewidth=1)
+                        pmra_mcmc_ep = []
+                        for i in range(1, no_of_spline_points + 1):
+                            pmra_mcmc_ep.append(ep['pmra'+str(i)])
+
+                        pmra_mcmc_em = []
+                        for i in range(1, no_of_spline_points + 1):
+                            pmra_mcmc_em.append(np.abs(em['pmra'+str(i)]))
+                        pmra_mcmc_errors = np.array([pmra_mcmc_em, pmra_mcmc_ep])
+
+                        yvals = np.zeros_like(self.mcmeta.phi1_spline_points) if residual_mode else pmra_mcmc_points
+                        ax[2].errorbar(self.mcmeta.phi1_spline_points, yvals, 
+                                        yerr=pmra_mcmc_errors, fmt='o', color='blue', 
+                                        markersize=8, zorder=10, alpha=0.8, markeredgecolor='white', 
+                                        markeredgewidth=1, capsize=3, capthick=1.5, elinewidth=1.5)
+
                         
                         # PMDEC spline
                         pmdec_mcmc = stream_funcs.apply_spline(
@@ -1999,34 +2036,33 @@ class StreamPlotter:
                             ax[3].plot(phi1_spline_plot, pmdec_mcmc, 'b-', linewidth=2, 
                                       label='MCMC Spline', alpha=0.8)
                         
-                        # Extract error bars for PMDEC spline points
-                        try:
-                            pmdec_mcmc_errors = []
-                            for i in range(1, no_of_spline_points + 1):
-                                if f'pmdec{i}' in caller_frame.f_globals.get('ep', {}) and f'pmdec{i}' in caller_frame.f_globals.get('em', {}):
-                                    ep_val = caller_frame.f_globals['ep'][f'pmdec{i}']
-                                    em_val = caller_frame.f_globals['em'][f'pmdec{i}']
-                                    pmdec_mcmc_errors.append([em_val, ep_val])
-                                elif f'pmdec{i}' in caller_frame.f_locals.get('ep', {}) and f'pmdec{i}' in caller_frame.f_locals.get('em', {}):
-                                    ep_val = caller_frame.f_locals['ep'][f'pmdec{i}']
-                                    em_val = caller_frame.f_locals['em'][f'pmdec{i}']
-                                    pmdec_mcmc_errors.append([em_val, ep_val])
-                                else:
-                                    pmdec_mcmc_errors.append([0, 0])
-                            
-                            pmdec_mcmc_errors = np.array(pmdec_mcmc_errors).T
-                            yvals = np.zeros_like(self.mcmeta.phi1_spline_points) if residual_mode else pmdec_mcmc_points
-                            ax[3].errorbar(self.mcmeta.phi1_spline_points, yvals, 
-                                          yerr=pmdec_mcmc_errors, fmt='o', color='blue', 
-                                          markersize=8, zorder=10, alpha=0.8, markeredgecolor='white', 
-                                          markeredgewidth=1, capsize=3, capthick=1.5, elinewidth=1.5)
-                        except:
-                            # Fallback to simple markers without error bars
-                            yvals = np.zeros_like(self.mcmeta.phi1_spline_points) if residual_mode else pmdec_mcmc_points
-                            ax[3].scatter(self.mcmeta.phi1_spline_points, yvals,
-                                         marker='o', color='blue', s=50, zorder=10, alpha=0.8,
-                                         edgecolors='white', linewidth=1)
+                        # Plot 1 sigma and 2 sigma regions for PMDEC
+                        sigma_pmdec = 10**meds['lsigpmdec']
+                        if residual_mode:
+                            ax[3].fill_between(phi1_spline_plot, -sigma_pmdec, +sigma_pmdec, color='blue', alpha=0.1)
+                            ax[3].fill_between(phi1_spline_plot, -2*sigma_pmdec, +2*sigma_pmdec, color='blue', alpha=0.05)
+                        else:
+                            ax[3].fill_between(phi1_spline_plot, pmdec_mcmc - sigma_pmdec, pmdec_mcmc + sigma_pmdec, color='blue', alpha=0.1)
+                            ax[3].fill_between(phi1_spline_plot, pmdec_mcmc - 2*sigma_pmdec, pmdec_mcmc + 2*sigma_pmdec, color='blue', alpha=0.05)
                         
+                        # Extract error bars for PMDEC spline points
+
+
+                        pmdec_mcmc_ep = []
+                        for i in range(1, no_of_spline_points + 1):
+                            pmdec_mcmc_ep.append(ep['pmdec'+str(i)])
+
+                        pmdec_mcmc_em = []
+                        for i in range(1, no_of_spline_points + 1):
+                            pmdec_mcmc_em.append(np.abs(em['pmdec'+str(i)]))
+                        pmdec_mcmc_errors = np.array([pmdec_mcmc_em, pmdec_mcmc_ep])
+
+                        yvals = np.zeros_like(self.mcmeta.phi1_spline_points) if residual_mode else pmdec_mcmc_points
+                        ax[3].errorbar(self.mcmeta.phi1_spline_points, yvals, 
+                                        yerr=pmdec_mcmc_errors, fmt='o', color='blue', 
+                                        markersize=8, zorder=10, alpha=0.8, markeredgecolor='white', 
+                                        markeredgewidth=1, capsize=3, capthick=1.5, elinewidth=1.5)
+
                         # FEH constant line
                         feh_mcmc = np.full_like(phi1_spline_plot, meds['feh1'])
                         if residual_mode:
@@ -2035,14 +2071,16 @@ class StreamPlotter:
                             ax[4].plot(phi1_spline_plot, feh_mcmc, 'b-', linewidth=2, 
                                       label='MCMC [Fe/H]', alpha=0.8)
                         
-                        # No FEH spline point markers or error bars on metallicity panel (line only)
-                                  
-                    finally:
-                        del frame
+                        # Plot 1 sigma and 2 sigma regions for FEH
+                        sigma_feh = 10**meds['lsigfeh']
+                        if residual_mode:
+                            ax[4].fill_between(phi1_spline_plot, -sigma_feh, +sigma_feh, color='blue', alpha=0.1)
+                            ax[4].fill_between(phi1_spline_plot, -2*sigma_feh, +2*sigma_feh, color='blue', alpha=0.05)
+                        else:
+                            ax[4].fill_between(phi1_spline_plot, feh_mcmc - sigma_feh, feh_mcmc + sigma_feh, color='blue', alpha=0.1)
+                            ax[4].fill_between(phi1_spline_plot, feh_mcmc - 2*sigma_feh, feh_mcmc + 2*sigma_feh, color='blue', alpha=0.05)
                         
-                except Exception as e:
-                    print(f"Warning: Could not plot MCMC splines: {e}")
-                    print("Make sure 'meds' dictionary with MCMC results is available in the calling scope")
+                        
         
         # Labels and formatting
         if show_initial_splines or show_optimized_splines or show_mcmc_splines:
@@ -2068,7 +2106,7 @@ class StreamPlotter:
             
         return fig, ax
     
-    def gaussian_mixture_plot(self, showStream=True, show_sf_only=False, background=True, save=False):
+    def gaussian_mixture_plot(self, showStream=True, background=True, save=False, show_model=True, show_total=True):
         """
         Plots Gaussian mixture model distributions for stream vs background in 4 dimensions:
         VGSR, FEH, PMRA, PMDEC
@@ -2129,10 +2167,12 @@ class StreamPlotter:
         bg_b = (self.mcmeta.truncation_params['vgsr_max'] - bg_vgsr_mean) / bg_vgsr_std
         bg_vgsr_pdf = truncnorm.pdf(vgsr_range, bg_a, bg_b, loc=bg_vgsr_mean, scale=bg_vgsr_std)
         
-        ax.plot(vgsr_range, stream_weight * stream_vgsr_pdf, ':', color=colors[0], label='Stream Component', lw=3)
-        ax.plot(vgsr_range, bg_weight * bg_vgsr_pdf, ':', color=colors[1], label='Background Component', lw=3)
-        ax.plot(vgsr_range, stream_weight * stream_vgsr_pdf + bg_weight * bg_vgsr_pdf, 'k-', label='Total Model', lw=3)
-        
+        if show_model:
+            ax.plot(vgsr_range, stream_weight * stream_vgsr_pdf, ':', color=colors[0], label='Stream Component', lw=3, zorder=2)
+            ax.plot(vgsr_range, bg_weight * bg_vgsr_pdf, ':', color=colors[1], label='Background Component', lw=3, zorder=2)
+        if show_model and show_total:
+            ax.plot(vgsr_range, stream_weight * stream_vgsr_pdf + bg_weight * bg_vgsr_pdf, 'k-', label='Total Model', lw=3,zorder=1)
+            
         ax.set_xlabel(r'V$_{GSR}$ (km/s)', fontsize=12)
         ax.set_xlim(self.mcmeta.truncation_params['vgsr_min'] - 50, self.mcmeta.truncation_params['vgsr_max'] + 50)
         ax.legend(fontsize='large')
@@ -2168,11 +2208,12 @@ class StreamPlotter:
         bg_a = (self.mcmeta.truncation_params['feh_min'] - bg_feh_mean) / bg_feh_std
         bg_b = (self.mcmeta.truncation_params['feh_max'] - bg_feh_mean) / bg_feh_std
         bg_feh_pdf = truncnorm.pdf(feh_range, bg_a, bg_b, loc=bg_feh_mean, scale=bg_feh_std)
-        
-        ax.plot(feh_range, stream_weight * stream_feh_pdf, ':', color=colors[0], lw=3)
-        ax.plot(feh_range, bg_weight * bg_feh_pdf, ':', color=colors[1], lw=3)
-        ax.plot(feh_range, stream_weight * stream_feh_pdf + bg_weight * bg_feh_pdf, 'k-', lw=3)
-        
+        if show_model:
+            ax.plot(feh_range, stream_weight * stream_feh_pdf, ':', color=colors[0], lw=3, zorder=2)
+            ax.plot(feh_range, bg_weight * bg_feh_pdf, ':', color=colors[1], lw=3, zorder=2)
+        if show_model and show_total:
+            ax.plot(feh_range, stream_weight * stream_feh_pdf + bg_weight * bg_feh_pdf, 'k-', lw=3, zorder=1)
+            
         ax.set_xlabel('[Fe/H]', fontsize=12)
         ax.set_xlim(self.mcmeta.truncation_params['feh_min'] - 0.5, self.mcmeta.truncation_params['feh_max'] + 0.5)
         ax.tick_params(axis='both', labelsize=14)
@@ -2207,11 +2248,12 @@ class StreamPlotter:
         bg_a = (self.mcmeta.truncation_params['pmra_min'] - bg_pmra_mean) / bg_pmra_std
         bg_b = (self.mcmeta.truncation_params['pmra_max'] - bg_pmra_mean) / bg_pmra_std
         bg_pmra_pdf = truncnorm.pdf(pmra_range, bg_a, bg_b, loc=bg_pmra_mean, scale=bg_pmra_std)
-        
-        ax.plot(pmra_range, stream_weight * stream_pmra_pdf, ':', color=colors[0], lw=3)
-        ax.plot(pmra_range, bg_weight * bg_pmra_pdf, ':', color=colors[1], lw=3)
-        ax.plot(pmra_range, stream_weight * stream_pmra_pdf + bg_weight * bg_pmra_pdf, 'k-', lw=3)
-        
+        if show_model:
+            ax.plot(pmra_range, stream_weight * stream_pmra_pdf, ':', color=colors[0], lw=3, zorder=2)
+            ax.plot(pmra_range, bg_weight * bg_pmra_pdf, ':', color=colors[1], lw=3, zorder=2)
+        if show_model and show_total:
+            ax.plot(pmra_range, stream_weight * stream_pmra_pdf + bg_weight * bg_pmra_pdf, 'k-', lw=3, zorder=1)
+            
  
         ax.set_xlabel(r'$\mu_{RA}$ (mas/yr)', fontsize=12)
         ax.set_xlim(self.mcmeta.truncation_params['pmra_min'] - 15, self.mcmeta.truncation_params['pmra_max'] + 15)
@@ -2247,10 +2289,11 @@ class StreamPlotter:
         bg_a = (self.mcmeta.truncation_params['pmdec_min'] - bg_pmdec_mean) / bg_pmdec_std
         bg_b = (self.mcmeta.truncation_params['pmdec_max'] - bg_pmdec_mean) / bg_pmdec_std
         bg_pmdec_pdf = truncnorm.pdf(pmdec_range, bg_a, bg_b, loc=bg_pmdec_mean, scale=bg_pmdec_std)
-        
-        ax.plot(pmdec_range, stream_weight * stream_pmdec_pdf, ':', color=colors[0], lw=3)
-        ax.plot(pmdec_range, bg_weight * bg_pmdec_pdf, ':', color=colors[1], lw=3)
-        ax.plot(pmdec_range, stream_weight * stream_pmdec_pdf + bg_weight * bg_pmdec_pdf, 'k-', lw=3)
+        if show_model:
+            ax.plot(pmdec_range, stream_weight * stream_pmdec_pdf, ':', color=colors[0], lw=3, zorder=2)
+            ax.plot(pmdec_range, bg_weight * bg_pmdec_pdf, ':', color=colors[1], lw=3, zorder=2)
+        if show_model and show_total:
+            ax.plot(pmdec_range, stream_weight * stream_pmdec_pdf + bg_weight * bg_pmdec_pdf, 'k-', lw=3, zorder=1)
         
         ax.set_xlabel(r'$\mu_{DEC}$ (mas/yr)', fontsize=12)
         ax.set_xlim(self.mcmeta.truncation_params['pmdec_min'] - 15, self.mcmeta.truncation_params['pmdec_max'] + 15)
@@ -2269,7 +2312,7 @@ class MCMeta:
     """
     For creating and plotting a spline track of the stream.
     """
-    def __init__(self, no_of_spline_points, stream_object, sf_data, truncation_params=None):
+    def __init__(self, no_of_spline_points, stream_object, sf_data, truncation_params=None, phi1_min=None, phi1_max=None):
         self.stream = stream_object
         self.no_of_spline_points = no_of_spline_points
         self.sf_data = sf_data
@@ -2280,7 +2323,13 @@ class MCMeta:
         else:
             self.spline_k = self.no_of_spline_points - 1
 
-        self.phi1_spline_points = np.linspace(self.stream.data.SoI_streamfinder['phi1'].min(), self.stream.data.SoI_streamfinder['phi1'].max(), self.no_of_spline_points)
+        # Use provided phi1 range or default to StreamFinder data range
+        if phi1_min is None:
+            phi1_min = self.stream.data.SoI_streamfinder['phi1'].min()
+        if phi1_max is None:
+            phi1_max = self.stream.data.SoI_streamfinder['phi1'].max()
+        
+        self.phi1_spline_points = np.linspace(phi1_min, phi1_max, self.no_of_spline_points)
 
         # Store truncation parameters for plotting
         if truncation_params is None:
