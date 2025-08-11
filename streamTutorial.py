@@ -1606,28 +1606,62 @@ class StreamPlotter:
                         ax[4].set_ylim(-1, 1)
 
         # Set y-axis limits based on stream data if available (fallback for non-residuals)
-        if (not residual_mode) and showStream and hasattr(self.data, 'confirmed_sf_and_desi') and len(self.data.confirmed_sf_and_desi) > 0:
-            # VGSR limits
-            vgsr_data = [self.data.confirmed_sf_and_desi['VGSR']]
-            if hasattr(self.data, 'cut_confirmed_sf_and_desi') and len(self.data.cut_confirmed_sf_and_desi) > 0 and show_cut:
-                vgsr_data.append(self.data.cut_confirmed_sf_and_desi['VGSR'])
-            vgsr_combined = np.concatenate([np.array(x) for x in vgsr_data])
-            ax[1].set_ylim(np.nanmin(vgsr_combined) - 50, np.nanmax(vgsr_combined) + 50)
+        if not residual_mode:
+            # Use membership probabilities to set y-limits if available
+            if show_membership_prob and stream_prob is not None:
+                high_prob_mask = stream_prob >= min_prob
+                high_prob_indices = np.where(high_prob_mask)[0]
+                if len(high_prob_indices) > 0:
+                    # Get padding values from plot params
+                    pad_v = self.plot_params.get('limits', {}).get('nonresidual_pad_vgsr', 50)
+                    pad_pm = self.plot_params.get('limits', {}).get('nonresidual_pad_pm', 5)
+                    pad_feh = self.plot_params.get('limits', {}).get('nonresidual_pad_feh', 0.5)
+                    
+                    # Get data from high-probability member stars
+                    member_vgsr = self.data.desi_data['VGSR'].iloc[high_prob_indices]
+                    member_pmra = self.data.desi_data['PMRA'].iloc[high_prob_indices]
+                    member_pmdec = self.data.desi_data['PMDEC'].iloc[high_prob_indices]
+                    
+                    # Set limits based on member star ranges with padding
+                    ax[1].set_ylim(np.nanmin(member_vgsr) - pad_v, np.nanmax(member_vgsr) + pad_v)
+                    ax[2].set_ylim(np.nanmin(member_pmra) - pad_pm, np.nanmax(member_pmra) + pad_pm)
+                    ax[3].set_ylim(np.nanmin(member_pmdec) - pad_pm, np.nanmax(member_pmdec) + pad_pm)
+                    
+                    # Handle metallicity if available
+                    if 'FEH' in self.data.desi_data.columns:
+                        member_feh = self.data.desi_data['FEH'].iloc[high_prob_indices]
+                        if len(member_feh.dropna()) > 0:
+                            ax[4].set_ylim(np.nanmin(member_feh) - pad_feh, np.nanmax(member_feh) + pad_feh)
+                        else:
+                            feh_ylim = self.plot_params.get('limits', {}).get('feh_ylim_default', (-4, -0.5))
+                            ax[4].set_ylim(*feh_ylim)
+                    else:
+                        feh_ylim = self.plot_params.get('limits', {}).get('feh_ylim_default', (-4, -0.5))
+                        ax[4].set_ylim(*feh_ylim)
             
-            # Proper motion limits  
-            pmra_data = [self.data.confirmed_sf_and_desi['PMRA']]
-            pmdec_data = [self.data.confirmed_sf_and_desi['PMDEC']]
-            if hasattr(self.data, 'cut_confirmed_sf_and_desi') and len(self.data.cut_confirmed_sf_and_desi) > 0 and show_cut:
-                pmra_data.append(self.data.cut_confirmed_sf_and_desi['PMRA'])
-                pmdec_data.append(self.data.cut_confirmed_sf_and_desi['PMDEC'])
-            pmra_combined = np.concatenate([np.array(x) for x in pmra_data])
-            pmdec_combined = np.concatenate([np.array(x) for x in pmdec_data])
-            ax[2].set_ylim(np.nanmin(pmra_combined) - 5, np.nanmax(pmra_combined) + 5)
-            ax[3].set_ylim(np.nanmin(pmdec_combined) - 5, np.nanmax(pmdec_combined) + 5)
+            # Fallback to StreamFinder data if no membership probabilities but showStream is True
+            elif showStream and hasattr(self.data, 'confirmed_sf_and_desi') and len(self.data.confirmed_sf_and_desi) > 0:
+                # VGSR limits
+                vgsr_data = [self.data.confirmed_sf_and_desi['VGSR']]
+                if hasattr(self.data, 'cut_confirmed_sf_and_desi') and len(self.data.cut_confirmed_sf_and_desi) > 0 and show_cut:
+                    vgsr_data.append(self.data.cut_confirmed_sf_and_desi['VGSR'])
+                vgsr_combined = np.concatenate([np.array(x) for x in vgsr_data])
+                ax[1].set_ylim(np.nanmin(vgsr_combined) - 50, np.nanmax(vgsr_combined) + 50)
+                
+                # Proper motion limits  
+                pmra_data = [self.data.confirmed_sf_and_desi['PMRA']]
+                pmdec_data = [self.data.confirmed_sf_and_desi['PMDEC']]
+                if hasattr(self.data, 'cut_confirmed_sf_and_desi') and len(self.data.cut_confirmed_sf_and_desi) > 0 and show_cut:
+                    pmra_data.append(self.data.cut_confirmed_sf_and_desi['PMRA'])
+                    pmdec_data.append(self.data.cut_confirmed_sf_and_desi['PMDEC'])
+                pmra_combined = np.concatenate([np.array(x) for x in pmra_data])
+                pmdec_combined = np.concatenate([np.array(x) for x in pmdec_data])
+                ax[2].set_ylim(np.nanmin(pmra_combined) - 5, np.nanmax(pmra_combined) + 5)
+                ax[3].set_ylim(np.nanmin(pmdec_combined) - 5, np.nanmax(pmdec_combined) + 5)
 
-            # Set metallicity limits (non-residuals default)
-            feh_ylim = self.plot_params.get('limits', {}).get('feh_ylim_default', (-4, -0.5))
-            ax[4].set_ylim(*feh_ylim)
+                # Set metallicity limits (non-residuals default)
+                feh_ylim = self.plot_params.get('limits', {}).get('feh_ylim_default', (-4, -0.5))
+                ax[4].set_ylim(*feh_ylim)
         
         # Plot splines if requested and available
         if (show_initial_splines or show_optimized_splines or show_mcmc_splines) and stream_frame and self.mcmeta is not None:
