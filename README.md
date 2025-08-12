@@ -95,6 +95,10 @@ conda env create -f env.yml
 This will set up the proper python environment to run this notebook.
 
 ## User tips & FAQ
+
+### [Cheatsheets](https://www.astro.utoronto.ca/~nasser.mohammed/explore_summer_school.html)
+Go to the above link to look at some example notebooks for finding streams.
+
 ### Plotting options
 `background = True` option: show the background stars in the figure for reference.
 
