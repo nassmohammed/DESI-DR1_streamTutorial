@@ -131,6 +131,8 @@ The second diagnostic plot is the corner plot. Your MCMC found something if the 
 
 # Bibliography
 
+Foreman-Mackey, D., Hogg, D. W., Lang, D., & Goodman, J. (2013). emcee: The MCMC Hammer. Publications of the Astronomical Society of the Pacific, 125(925), 306. https://doi.org/10.1086/670067
+
 Ibata, R., Malhan, K., Tenachi, W., Ardern-Arentsen, A., Bellazzini, M., Bianchini, P., Bonifacio, P., Caffau, E., Diakogiannis, F., Errani, R., Famaey, B., Ferrone, S., Martin, N. F., di Matteo, P., Monari, G., Renaud, F., Starkenburg, E., Thomas, G., Viswanathan, A., & Yuan, Z. (2024). Charting the Galactic Acceleration Field. II. A Global Mass Model of the Milky Way from the STREAMFINDER Atlas of Stellar Streams Detected in Gaia DR3. The Astrophysical Journal, 967(1), 89. https://doi.org/10.3847/1538-4357/ad382d
 
 Koposov, S. E., Li, T. S., Allende Prieto, C., Medina, G. E., Sandford, N., Aguado, D., Beraldo e Silva, L., Byström, A., Cooper, A. P., Dey, A., Frenk, C. S., et al. (2025). DESI Data Release 1: Stellar Catalogue. arXiv preprint arXiv:2505.14787.
