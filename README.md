@@ -65,7 +65,6 @@ Included is
   - `dotter/` - Stellar evolution models from Dotter et al. 2006
   - `sf3_only_table.csv` - overview table of STREAMFINDER streams
   - `streamfinder_gaiadr3.fits` - file including stars in STREAMFINDER streams (modified from Ibata et al. 2024)
-- `stream_examples/` - directory including .html files from succesfully run notebook. This is your cheatsheet, only use if you're truly stuck!
 - `*.py` - scripts powering the tutorial
 - `streamTutorial.ipynb` - the main notebook you will be working with.
 - `env.yml` - the file to setup the required python and package versions for this tutorail.
@@ -85,7 +84,7 @@ Read [here](https://data.desi.lbl.gov/doc/releases/dr1/vac/mws/) for a general o
 
 If space is a concern for your device, contact `ting [dot] li [at] astro [dot] utoronto [dot] ca` to get set up on the Eridanus server (Only for participants at the 2025 EXPLORE summer school and research workshop at York University).
 
-**W.I.P.** Google collab notebook for running on weaker laptops.
+[Google collab](https://colab.research.google.com/drive/1tf9Opu2dVatyKhWVHd1HcKW3n0aVhzZq?usp=sharing) notebook for running on weaker laptops.
 
 ### Install Python Environment
 In your cloned directory, run the following in your terminal:
