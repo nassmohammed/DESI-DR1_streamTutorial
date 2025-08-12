@@ -375,10 +375,31 @@ class Selection:
 
 
 class stream:
-    def __init__(self, data_object, streamName='Sylgr-I21', streamNo=42, frame=None):
+    def __init__(self, data_object, streamName='Sylgr-I21', frame=None):
         self.streamName = streamName
-        self.streamNo = streamNo
         self.frame=frame
+        
+        # Load the SF3 table to find stream index based on name
+        import os
+        sf3_table_path = os.path.join(os.path.dirname(__file__), 'data', 'sf3_table_dr1.csv')
+        sf3_table = pd.read_csv(sf3_table_path)
+        
+        # Try to find stream index by matching either 'Stream' or 'Galstream Stream name' columns
+        stream_match = sf3_table[
+            (sf3_table['Stream'] == streamName) | 
+            (sf3_table['Galstream Stream name'] == streamName)
+        ]
+        
+        if len(stream_match) == 0:
+            raise ValueError(f"Stream '{streamName}' not found in sf3_table_dr1.csv. "
+                           f"Available streams: {sf3_table['Stream'].tolist()} or "
+                           f"galstream names: {sf3_table['Galstream Stream name'].tolist()}")
+        elif len(stream_match) > 1:
+            raise ValueError(f"Multiple matches found for stream '{streamName}'. Please be more specific.")
+        
+        # Extract the stream index
+        self.streamNo = int(stream_match['SF3 Stream Index'].iloc[0])
+        print(f"Found stream '{streamName}' with index {self.streamNo}")
 
         # Store a reference to the data object instead of re-running the init
         self.data = data_object
@@ -1712,6 +1733,16 @@ class StreamPlotter:
                 # Fallback to current axis limits if no data available
                 phi1_min = ax[1].get_xlim()[0]
                 phi1_max = ax[1].get_xlim()[1]
+            
+            # Ensure the range extends beyond spline points to cover the full data/plotting range
+            if hasattr(self.mcmeta, 'phi1_spline_points'):
+                spline_min = np.min(self.mcmeta.phi1_spline_points)
+                spline_max = np.max(self.mcmeta.phi1_spline_points)
+                # Extend range to at least the spline points, plus some buffer for extrapolation
+                spline_range = spline_max - spline_min
+                buffer = 0.2 * spline_range  # 20% buffer beyond spline range
+                phi1_min = min(phi1_min, spline_min - buffer)
+                phi1_max = max(phi1_max, spline_max + buffer)
             
             phi1_spline_plot = np.linspace(phi1_min, phi1_max, 200)  # Increased resolution
             

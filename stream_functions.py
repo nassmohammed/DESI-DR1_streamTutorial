@@ -1943,8 +1943,6 @@ def spline_lnprob_1D(theta, prior, spline_x_points, vgsr, vgsr_err, feh, feh_err
     tan_pstream = tan_transform(pstream)
     lpstream = np.log(atan_inverse(tan_pstream))
 
-    # Calculate lnprob for vgsr, pmra, pmdec - lsigv now constant along stream
-    lsigv_scaled = np.log(10**lsigv)
     
     if np.any(1-(np.e**lpstream) <= 0):
         print('bad pstream')
