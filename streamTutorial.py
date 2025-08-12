@@ -2447,23 +2447,31 @@ class MCMeta:
 
         p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['VGSR'].values, 2)
         self.vgsr_fit = np.poly1d(p)
-        self.initial_params['lsigvgsr'] = np.log10(self.sf_data['VGSR'].values.std())
+        # Calculate residuals around the fitted track
+        vgsr_residuals = self.sf_data['VGSR'].values - self.vgsr_fit(self.sf_data['phi1'].values)
+        self.initial_params['lsigvgsr'] = np.log10(vgsr_residuals.std())
         self.initial_params['vgsr_spline_points'] = self.vgsr_fit(self.phi1_spline_points)
         print(f"Stream VGSR dispersion from trimmed SF: {10**self.initial_params['lsigvgsr']:.2f} km/s")
 
         self.initial_params['feh1'] = self.sf_data['FEH'].values.mean()
-        self.initial_params['lsigfeh'] = np.log10(self.sf_data['FEH'].values.std())
+        # For metallicity, use std around the mean since it's expected to be roughly constant
+        feh_residuals = self.sf_data['FEH'].values - self.initial_params['feh1']
+        self.initial_params['lsigfeh'] = np.log10(feh_residuals.std())
         print(f'Stream mean metallicity from trimmed SF: {self.initial_params["feh1"]:.2f} +- {10**self.initial_params["lsigfeh"]:.3f} dex')
 
         p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMRA'].values, 2)
         self.pmra_fit = np.poly1d(p)
-        self.initial_params['lsigpmra'] = np.log10(self.sf_data['PMRA'].values.std())
+        # Calculate residuals around the fitted track
+        pmra_residuals = self.sf_data['PMRA'].values - self.pmra_fit(self.sf_data['phi1'].values)
+        self.initial_params['lsigpmra'] = np.log10(pmra_residuals.std())
         self.initial_params['pmra_spline_points'] = self.pmra_fit(self.phi1_spline_points)
         print(f"Stream PMRA dispersion from trimmed SF: {10**self.initial_params['lsigpmra']:.2f} mas/yr")
 
         p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMDEC'].values, 2)
         self.pmdec_fit = np.poly1d(p)
-        self.initial_params['lsigpmdec'] = np.log10(self.sf_data['PMDEC'].values.std())
+        # Calculate residuals around the fitted track
+        pmdec_residuals = self.sf_data['PMDEC'].values - self.pmdec_fit(self.sf_data['phi1'].values)
+        self.initial_params['lsigpmdec'] = np.log10(pmdec_residuals.std())
         self.initial_params['pmdec_spline_points'] = self.pmdec_fit(self.phi1_spline_points)
         print(f"Stream PMDEC dispersion from trimmed SF: {10**self.initial_params['lsigpmdec']:.2f} mas/yr")
 
