@@ -95,7 +95,6 @@ conda env create -f env.yml
 This will set up the proper python environment to run this notebook.
 
 ## User tips & FAQ
-
 ### Plotting options
 `background = True` option: show the background stars in the figure for reference.
 
