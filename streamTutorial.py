@@ -2443,6 +2443,8 @@ class MCMeta:
         self.initial_params = {}
 
         print('Making stream initial guess based on galstream and STREAMFINDER...')
+        self.initial_params['pstream'] = np.abs(len(self.sf_data)/len(self.stream.data.desi_data))
+
         p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['VGSR'].values, 2)
         self.vgsr_fit = np.poly1d(p)
         self.initial_params['lsigvgsr'] = np.log10(self.sf_data['VGSR'].values.std())
@@ -2484,9 +2486,8 @@ class MCMeta:
     
     def priors(self, prior_arr):
         self.prior_arr = prior_arr
-
         self.p0_guess = [
-        0.1,                                                 # pstream (constant stream fraction)
+        self.initial_params['pstream'],                                                 # pstream (constant stream fraction)
         self.initial_params['vgsr_spline_points'],         # VGSR spline points
         self.initial_params['lsigvgsr'],                   # lsigvgsr (constant log velocity dispersion)
         self.initial_params['feh1'],                       # mean [Fe/H]
@@ -2562,8 +2563,12 @@ class MCMeta:
         # Generate walker positions around the starting point
         p0s = np.random.multivariate_normal(self.p0, np.diag(self.ep0)**2, size=self.nwalkers)
 
-        # Clip pstream to valid range [0, 1] - first parameter only
-        p0s[:,0] = np.clip(p0s[:,0], 1e-10, 1 - 1e-10)
+        # Clip all walker positions to be within their prior ranges
+        for i in range(len(self.prior_arr)):
+            min_val, max_val = self.prior_arr[i]
+            # Add a small buffer to avoid being exactly on the boundary
+            buffer = 1e-7
+            p0s[:, i] = np.clip(p0s[:, i], min_val + buffer, max_val - buffer)
 
         # Test likelihood for all walkers using the modified function
         lkhds = [stream_funcs.spline_lnprob_1D(
