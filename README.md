@@ -127,6 +127,17 @@ A: We print out some diagonstic plots to judge how well the MCMC did. First the 
 
 The second diagnostic plot is the corner plot. Your MCMC found something if the plots are generally symmetric about the means and have well-defined distributions.
 
+# Citing this work
+```
+@misc{DESI-DR1_streamTutorial,
+  author       = {Nasser Mohammed},
+  title        = {DESI-DR1\_streamTutorial},
+  year         = {2025},
+  publisher    = {GitHub},
+  journal      = {GitHub repository},
+  howpublished = {\url{https://github.com/nassmohammed/DESI-DR1_streamTutorial}},
+}
+```
 
 # Bibliography
 
