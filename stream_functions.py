@@ -2165,34 +2165,15 @@ def _basic_lnprob(theta, prior, vgsr, vgsr_err, feh, feh_err, pmra, pmra_err, pm
         feh1_min, feh1_max, lsigfeh_min, lsigfeh_max, bfeh_min, bfeh_max = -np.inf, np.inf, -np.inf, np.inf, -np.inf, np.inf
     
     # Prior check
-    if (
-        (lpstream > 0) or 
-        (lsigv > lsigv_max) or (lsigfeh > lsigfeh_max) or (lsigpmra > lsigpmra_max) or (lsigpmdec > lsigpmdec_max) or 
-        (lsigv < lsigv_min) or (lsigfeh < lsigfeh_min) or (lsigpmra < lsigpmra_min) or (lsigpmdec < lsigpmdec_min) or 
-        (lsigbv > lsigbv_max) or (lsigbfeh > lsigbfeh_max) or (lsigbpmra > lsigbpmra_max) or (lsigbpmdec > lsigbpmdec_max) or 
-        (lsigbv < lsigbv_min) or (lsigbfeh < lsigbfeh_min) or (lsigbpmra < lsigbpmra_min) or (lsigbpmdec < lsigbpmdec_min) or 
-        (v1 > v1_max) or (v1 < v1_min) or (v2 > v2_max) or (v2 < v2_min) or (v3 > v3_max) or (v3 < v3_min) or 
-        (feh1 > feh1_max) or (feh1 < feh1_min) or 
-        (pmra1 > pmra1_max) or (pmra1 < pmra1_min) or (pmra2 > pmra2_max) or (pmra2 < pmra2_min) or (pmra3 > pmra3_max) or (pmra3 < pmra3_min) or 
-        (pmdec1 > pmdec1_max) or (pmdec1 < pmdec1_min) or (pmdec2 > pmdec2_max) or (pmdec2 < pmdec2_min) or (pmdec3 > pmdec3_max) or (pmdec3 < pmdec3_min) or 
-        (bv > bv_max) or (bv < bv_min) or (bfeh > bfeh_max) or (bfeh < bfeh_min) or (bpmra > bpmra_max) or (bpmra < bpmra_min) or (bpmdec > bpmdec_max) or (bpmdec < bpmdec_min)
-    ): 
-        if assert_prior:
-            index = [
-            (lpstream > 0), 
-            (lsigv > lsigv_max) or (lsigv < lsigv_min) , (lsigfeh > lsigfeh_max) or (lsigfeh < lsigfeh_min), (lsigpmra > lsigpmra_max) or (lsigpmra < lsigpmra_min), (lsigpmdec > lsigpmdec_max) or (lsigpmdec < lsigpmdec_min),
-            (lsigbv > lsigbv_max) or (lsigbv < lsigbv_min), (lsigbfeh > lsigbfeh_max) or (lsigbfeh < lsigbfeh_min), (lsigbpmra > lsigbpmra_max) or (lsigbpmra < lsigbpmra_min), (lsigbpmdec > lsigbpmdec_max) or (lsigbpmdec < lsigbpmdec_min),
-            (v1 > v1_max) or (v1 < v1_min), (v2 > v2_max) or (v2 < v2_min), (v3 > v3_max) or (v3 < v3_min), 
-            (feh1 > feh1_max) or (feh1 < feh1_min), 
-            (pmra1 > pmra1_max) or (pmra1 < pmra1_min), (pmra2 > pmra2_max) or (pmra2 < pmra2_min), (pmra3 > pmra3_max) or (pmra3 < pmra3_min),
-            (pmdec1 > pmdec1_max) or (pmdec1 < pmdec1_min), (pmdec2 > pmdec2_max) or (pmdec2 < pmdec2_min), (pmdec3 > pmdec3_max) or (pmdec3 < pmdec3_min),
-            (bv > bv_max) or (bv < bv_min), (bfeh > bfeh_max) or (bfeh < bfeh_min), (bpmra > bpmra_max) or (bpmra < bpmra_min), (bpmdec > bpmdec_max) or (bpmdec < bpmdec_min)
-            ]
             
-            print(np.array([f'pstream: {10**lpstream}', 'lsigv', 'lsigfeh', 'lsigpmra', 'lsigpmdec', 'lsigbv', 'lsigbfeh', 'lsigbpmra', 'lsigbpmdec', 'v1', 'v2', 'v3', 'feh1',\
-                    'pmra1', 'pmra2', 'pmra3', 'pmdec1', 'pmdec2', 'pmdec3', 'bv', 'bfeh', 'bpmra', 'bpmdec'])[index])
+    for i in range(len(theta)):
+        if (theta[i] < prior[i][0]) or (theta[i] > prior[i][1]):
+            if assert_prior:
+                print(theta[i])
+                print(theta_labels[i])
 
-        return -1e10
+            return -1e10  # outside of prior, return a tiny number
+    
     
     # Calculate likelihoods
     if fit_feh:

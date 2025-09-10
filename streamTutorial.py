@@ -2599,10 +2599,10 @@ class MCMeta:
             fit_feh=True, truncated=True, assert_prior=True
         ) for j in range(self.nwalkers)]
 
-        # Check if prior is good - this is the key test from your original code
         if sum(np.array(lkhds) > -9e9) == self.nwalkers:
             print('Your prior is good, you\'ve found something!')
         elif sum(np.array(lkhds) > -9e9) != self.nwalkers:
+            
             print('Your prior is too restrictive, try changing the values listed above!')
 
         # Assert that all walkers have good likelihoods
