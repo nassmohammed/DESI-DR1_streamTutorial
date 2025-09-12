@@ -2469,41 +2469,47 @@ class MCMeta:
 
         p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['VGSR'].values, 2)
         self.vgsr_fit = np.poly1d(p)
-        self.initial_params['lsigvgsr'] = np.log10(self.sf_data['VGSR'].values.std())
+        self.initial_params['lsigvgsr'] = np.log10(((self.sf_data['VGSR'].values.std())**2 - (np.mean(self.sf_data['VRAD_ERR'].values))**2)**0.5)
         self.initial_params['vgsr_spline_points'] = self.vgsr_fit(self.phi1_spline_points)
         print(f"Stream VGSR dispersion from trimmed SF: {10**self.initial_params['lsigvgsr']:.2f} km/s")
 
         self.initial_params['feh1'] = self.sf_data['FEH'].values.mean()
-        self.initial_params['lsigfeh'] = np.log10(self.sf_data['FEH'].values.std())
+        self.initial_params['lsigfeh'] = np.log10(((self.sf_data['FEH'].values.std())**2 - (np.mean(self.sf_data['FEH_ERR'].values))**2)**0.5)
         print(f'Stream mean metallicity from trimmed SF: {self.initial_params["feh1"]:.2f} +- {10**self.initial_params["lsigfeh"]:.3f} dex')
 
         p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMRA'].values, 2)
         self.pmra_fit = np.poly1d(p)
-        self.initial_params['lsigpmra'] = np.log10(self.sf_data['PMRA'].values.std())
+        self.initial_params['lsigpmra'] = np.log10(((self.sf_data['PMRA'].values.std())**2 - (np.mean(self.sf_data['PMRA_ERROR'].values))**2)**0.5)
         self.initial_params['pmra_spline_points'] = self.pmra_fit(self.phi1_spline_points)
         print(f"Stream PMRA dispersion from trimmed SF: {10**self.initial_params['lsigpmra']:.2f} mas/yr")
 
         p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMDEC'].values, 2)
         self.pmdec_fit = np.poly1d(p)
-        self.initial_params['lsigpmdec'] = np.log10(self.sf_data['PMDEC'].values.std())
+        self.initial_params['lsigpmdec'] = np.log10(((self.sf_data['PMDEC'].values.std())**2 - (np.mean(self.sf_data['PMDEC_ERROR'].values))**2)**0.5)
         self.initial_params['pmdec_spline_points'] = self.pmdec_fit(self.phi1_spline_points)
         print(f"Stream PMDEC dispersion from trimmed SF: {10**self.initial_params['lsigpmdec']:.2f} mas/yr")
 
         print('Making background initial guess...')
-        self.initial_params['bv'] = np.mean(np.array(self.stream.data.desi_data['VGSR']))
-        self.initial_params['lsigbv'] = np.log10(np.std(np.array(self.stream.data.desi_data['VGSR'])))
+        counts, edges = np.histogram(np.array(self.stream.data.desi_data['VGSR']), bins=50)
+        self.initial_params['bv'] = 0.5 * (edges[np.argmax(counts)] + edges[np.argmax(counts) + 1])
+
+        self.initial_params['lsigbv'] = np.log10(((np.std(np.array(self.stream.data.desi_data['VGSR'])))**2 - (np.mean(np.array(self.stream.data.desi_data['VRAD_ERR'])))**2)**0.5)
         print(f"Background velocity: {self.initial_params['bv']:.2f} +- {10**self.initial_params['lsigbv']:.2f} km/s")
 
-        self.initial_params['bfeh'] = np.mean(np.array(self.stream.data.desi_data['FEH']))
-        self.initial_params['lsigbfeh'] = np.log10(np.std(np.array(self.stream.data.desi_data['FEH'])))
+
+        counts, edges = np.histogram(np.array(self.stream.data.desi_data['FEH']), bins=50)
+        self.initial_params['bfeh'] = 0.5 * (edges[np.argmax(counts)] + edges[np.argmax(counts) + 1])
+        self.initial_params['lsigbfeh'] = np.log10(((np.std(np.array(self.stream.data.desi_data['FEH'])))**2 - (np.mean(np.array(self.stream.data.desi_data['FEH_ERR'])))**2)**0.5)
         print(f"Background metallicity: {self.initial_params['bfeh']:.2f} +- {10**self.initial_params['lsigbfeh']:.3f} dex")
 
-        self.initial_params['bpmra'] = np.mean(np.array(self.stream.data.desi_data['PMRA']))
-        self.initial_params['lsigbpmra'] = np.log10(np.std(np.array(self.stream.data.desi_data['PMRA'])))
+        counts, edges = np.histogram(np.array(self.stream.data.desi_data['PMRA']), bins=50)
+        self.initial_params['bpmra'] = 0.5 * (edges[np.argmax(counts)] + edges[np.argmax(counts) + 1])
+        self.initial_params['lsigbpmra'] = np.log10(((np.std(np.array(self.stream.data.desi_data['PMRA'])))**2 - (np.mean(np.array(self.stream.data.desi_data['PMRA_ERROR'])))**2)**0.5)
         print(f"Background PMRA: {self.initial_params['bpmra']:.2f} +- {10**self.initial_params['lsigbpmra']:.2f} mas/yr")
 
-        self.initial_params['bpmdec'] = np.mean(np.array(self.stream.data.desi_data['PMDEC']))
-        self.initial_params['lsigbpmdec'] = np.log10(np.std(np.array(self.stream.data.desi_data['PMDEC'])))
+        counts, edges = np.histogram(np.array(self.stream.data.desi_data['PMDEC']), bins=50)
+        self.initial_params['bpmdec'] = 0.5 * (edges[np.argmax(counts)] + edges[np.argmax(counts) + 1])
+        self.initial_params['lsigbpmdec'] = np.log10(((np.std(np.array(self.stream.data.desi_data['PMDEC'])))**2 - (np.mean(np.array(self.stream.data.desi_data['PMDEC_ERROR'])))**2)**0.5)
         print(f"Background PMDEC: {self.initial_params['bpmdec']:.2f} +- {10**self.initial_params['lsigbpmdec']:.2f} mas/yr")
     
     def priors(self, prior_arr):
@@ -2554,7 +2560,7 @@ class MCMeta:
         )
         # Run optimization
         print("Running optimization...")
-        self.sp_result = sp.optimize.minimize(optfunc, self.flat_p0_guess, method="Nelder-Mead")
+        self.sp_result = sp.optimize.minimize(optfunc, self.flat_p0_guess, method="COBYLA", options={'maxiter': 20000, 'maxfev': 20000})
         print(self.sp_result.message)
 
         self.reshaped_result = stream_funcs.reshape_arr(self.sp_result.x, self.array_lengths)
