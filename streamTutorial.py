@@ -1626,7 +1626,7 @@ class StreamPlotter:
                 high_prob_indices = np.where(high_prob_mask)[0]
                 if len(high_prob_indices) > 0:
                     pad_v = self.plot_params.get('limits', {}).get('residual_pad_vgsr', 20)
-                    pad_pm = self.plot_params.get('limits', {}).get('residual_pad_pm', poly_dim)
+                    pad_pm = self.plot_params.get('limits', {}).get('residual_pad_pm', 2)
                     pad_feh = self.plot_params.get('limits', {}).get('residual_pad_feh', 0.2)
                     # Build residual arrays from high-probability members
                     y1_hp = (self.data.desi_data['VGSR'].iloc[high_prob_indices]
@@ -2230,8 +2230,12 @@ class StreamPlotter:
             ax.hist(sf_data['VGSR'], density=True, color='lightblue', bins=bins, alpha=0.8, label='SF Stars')
             
         # Plot truncated Gaussian components
-        vgsr_range = np.linspace(self.mcmeta.truncation_params['vgsr_min'] - 50, 
-                                self.mcmeta.truncation_params['vgsr_max'] + 50, 200)
+        if self.mcmeta.truncation_params['vgsr_min'] != -np.inf or self.mcmeta.truncation_params['vgsr_max'] != np.inf:
+            vgsr_range = np.linspace(self.mcmeta.truncation_params['vgsr_min'] - 50, 
+                                    self.mcmeta.truncation_params['vgsr_max'] + 50, 200)
+        else:
+            vgsr_range = np.linspace(np.min(desi_data['VGSR']) - 50, 
+                                    np.max(desi_data['VGSR']) + 50, 200)
         
         # Stream component (using mean of spline points as approximation)
         stream_vgsr_mean = np.mean(self.mcmeta.initial_params['vgsr_spline_points'])
@@ -2258,7 +2262,8 @@ class StreamPlotter:
             ax.plot(vgsr_range, stream_weight * stream_vgsr_pdf + bg_weight * bg_vgsr_pdf, 'k-', label='Total Model', lw=3,zorder=1)
             
         ax.set_xlabel(r'V$_{GSR}$ (km/s)', fontsize=12)
-        ax.set_xlim(self.mcmeta.truncation_params['vgsr_min'] - 50, self.mcmeta.truncation_params['vgsr_max'] + 50)
+        if self.mcmeta.truncation_params['vgsr_min'] != -np.inf and self.mcmeta.truncation_params['vgsr_max'] != np.inf:
+            ax.set_xlim(self.mcmeta.truncation_params['vgsr_min'] - 50, self.mcmeta.truncation_params['vgsr_max'] + 50)
         ax.legend(fontsize='large')
         ax.tick_params(axis='both', labelsize=14)
         stream_funcs.plot_form(ax)
@@ -2272,9 +2277,13 @@ class StreamPlotter:
             ax.hist(sf_data['FEH'], density=True, color='lightblue', bins=bins, alpha=0.8)
             
         # Plot truncated Gaussian components
-        feh_range = np.linspace(self.mcmeta.truncation_params['feh_min'] - 0.5, 
-                               self.mcmeta.truncation_params['feh_max'] + 0.5, 200)
-        
+        if self.mcmeta.truncation_params['feh_min'] != -np.inf or self.mcmeta.truncation_params['feh_max'] != np.inf:
+            feh_range = np.linspace(self.mcmeta.truncation_params['feh_min'] - 0.5, 
+                                self.mcmeta.truncation_params['feh_max'] + 0.5, 200)
+        else:
+            feh_range = np.linspace(np.min(desi_data['FEH']) - 0.5, 
+                                np.max(desi_data['FEH']) + 0.5, 200)
+
         # Stream component
         stream_feh_mean = self.mcmeta.initial_params['feh1']
         stream_feh_std = 10**self.mcmeta.initial_params['lsigfeh']
@@ -2299,7 +2308,8 @@ class StreamPlotter:
             ax.plot(feh_range, stream_weight * stream_feh_pdf + bg_weight * bg_feh_pdf, 'k-', lw=3, zorder=1)
             
         ax.set_xlabel('[Fe/H]', fontsize=12)
-        ax.set_xlim(self.mcmeta.truncation_params['feh_min'] - 0.5, self.mcmeta.truncation_params['feh_max'] + 0.5)
+        if self.mcmeta.truncation_params['feh_min'] != -np.inf and self.mcmeta.truncation_params['feh_max'] != np.inf:
+            ax.set_xlim(self.mcmeta.truncation_params['feh_min'] - 0.5, self.mcmeta.truncation_params['feh_max'] + 0.5)
         ax.tick_params(axis='both', labelsize=14)
         stream_funcs.plot_form(ax)
         
@@ -2312,9 +2322,13 @@ class StreamPlotter:
             ax.hist(sf_data['PMRA'], density=True, color='lightblue', bins=bins, alpha=0.8)
             
         # Plot truncated Gaussian components
-        pmra_range = np.linspace(self.mcmeta.truncation_params['pmra_min'] - 15, 
+        if self.mcmeta.truncation_params['pmra_min'] != -np.inf or self.mcmeta.truncation_params['pmra_max'] != np.inf:
+            pmra_range = np.linspace(self.mcmeta.truncation_params['pmra_min'] - 15, 
                                 self.mcmeta.truncation_params['pmra_max'] + 15, 200)
-        
+        else:
+            pmra_range = np.linspace(np.min(desi_data['PMRA']) - 15, 
+                                np.max(desi_data['PMRA']) + 15, 200)
+
         # Stream component (using mean of spline points as approximation)
         stream_pmra_mean = np.mean(self.mcmeta.initial_params['pmra_spline_points'])
         stream_pmra_std = 10**self.mcmeta.initial_params['lsigpmra']
@@ -2340,7 +2354,8 @@ class StreamPlotter:
             
  
         ax.set_xlabel(r'$\mu_{RA}$ (mas/yr)', fontsize=12)
-        ax.set_xlim(self.mcmeta.truncation_params['pmra_min'] - 15, self.mcmeta.truncation_params['pmra_max'] + 15)
+        if self.mcmeta.truncation_params['pmra_min'] != -np.inf and self.mcmeta.truncation_params['pmra_max'] != np.inf:
+            ax.set_xlim(self.mcmeta.truncation_params['pmra_min'] - 15, self.mcmeta.truncation_params['pmra_max'] + 15)
         ax.tick_params(axis='both', labelsize=14)
         stream_funcs.plot_form(ax)
         
@@ -2353,9 +2368,13 @@ class StreamPlotter:
             ax.hist(sf_data['PMDEC'], density=True, color='lightblue', bins=bins, alpha=0.8)
             
         # Plot truncated Gaussian components
-        pmdec_range = np.linspace(self.mcmeta.truncation_params['pmdec_min'] - 15, 
+        if self.mcmeta.truncation_params['pmdec_min'] != -np.inf or self.mcmeta.truncation_params['pmdec_max'] != np.inf:
+            pmdec_range = np.linspace(self.mcmeta.truncation_params['pmdec_min'] - 15, 
                                  self.mcmeta.truncation_params['pmdec_max'] + 15, 200)
-        
+        else:
+            pmdec_range = np.linspace(np.min(desi_data['PMDEC']) - 15, 
+                                 np.max(desi_data['PMDEC']) + 15, 200)
+
         # Stream component (using mean of spline points as approximation)
         stream_pmdec_mean = np.mean(self.mcmeta.initial_params['pmdec_spline_points'])
         stream_pmdec_std = 10**self.mcmeta.initial_params['lsigpmdec']
@@ -2380,7 +2399,8 @@ class StreamPlotter:
             ax.plot(pmdec_range, stream_weight * stream_pmdec_pdf + bg_weight * bg_pmdec_pdf, 'k-', lw=3, zorder=1)
         
         ax.set_xlabel(r'$\mu_{DEC}$ (mas/yr)', fontsize=12)
-        ax.set_xlim(self.mcmeta.truncation_params['pmdec_min'] - 15, self.mcmeta.truncation_params['pmdec_max'] + 15)
+        if self.mcmeta.truncation_params['pmdec_min'] != -np.inf and self.mcmeta.truncation_params['pmdec_max'] != np.inf:
+            ax.set_xlim(self.mcmeta.truncation_params['pmdec_min'] - 15, self.mcmeta.truncation_params['pmdec_max'] + 15)
         ax.tick_params(axis='both', labelsize=14)
         stream_funcs.plot_form(ax)
         
@@ -2396,7 +2416,7 @@ class MCMeta:
     """
     For creating and plotting a spline track of the stream.
     """
-    def __init__(self, no_of_spline_points, stream_object, sf_data, truncation_params=None, phi1_min=None, phi1_max=None, poly_dim=2):
+    def __init__(self, no_of_spline_points, stream_object, sf_data, truncation_params=None, phi1_min=None, phi1_max=None):
         self.stream = stream_object
         self.no_of_spline_points = no_of_spline_points
         self.sf_data = sf_data
@@ -2420,14 +2440,14 @@ class MCMeta:
             # Default truncation values based on data range
             data = self.stream.data.desi_data
             self.truncation_params = {
-                'vgsr_min': data['VGSR'].min(),
-                'vgsr_max': data['VGSR'].max(),
-                'feh_min': data['FEH'].min(),
-                'feh_max': data['FEH'].max(),
-                'pmra_min': data['PMRA'].min(),
-                'pmra_max': data['PMRA'].max(),
-                'pmdec_min': data['PMDEC'].min(),
-                'pmdec_max': data['PMDEC'].max()
+                'vgsr_min': -np.inf,
+                'vgsr_max': np.inf,
+                'feh_min': -np.inf,
+                'feh_max': np.inf,
+                'pmra_min': -np.inf,
+                'pmra_max': np.inf,
+                'pmdec_min': -np.inf,
+                'pmdec_max': np.inf
             }
         else:
             self.truncation_params = truncation_params
@@ -2447,7 +2467,7 @@ class MCMeta:
         print('Making stream initial guess based on galstream and STREAMFINDER...')
         self.initial_params['pstream'] = np.abs(len(self.sf_data)/len(self.stream.data.desi_data))
 
-        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['VGSR'].values, poly_dim)
+        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['VGSR'].values, 2)
         self.vgsr_fit = np.poly1d(p)
         self.initial_params['lsigvgsr'] = np.log10(self.sf_data['VGSR'].values.std())
         self.initial_params['vgsr_spline_points'] = self.vgsr_fit(self.phi1_spline_points)
@@ -2457,13 +2477,13 @@ class MCMeta:
         self.initial_params['lsigfeh'] = np.log10(self.sf_data['FEH'].values.std())
         print(f'Stream mean metallicity from trimmed SF: {self.initial_params["feh1"]:.2f} +- {10**self.initial_params["lsigfeh"]:.3f} dex')
 
-        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMRA'].values, poly_dim)
+        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMRA'].values, 2)
         self.pmra_fit = np.poly1d(p)
         self.initial_params['lsigpmra'] = np.log10(self.sf_data['PMRA'].values.std())
         self.initial_params['pmra_spline_points'] = self.pmra_fit(self.phi1_spline_points)
         print(f"Stream PMRA dispersion from trimmed SF: {10**self.initial_params['lsigpmra']:.2f} mas/yr")
 
-        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMDEC'].values, poly_dim)
+        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMDEC'].values, 2)
         self.pmdec_fit = np.poly1d(p)
         self.initial_params['lsigpmdec'] = np.log10(self.sf_data['PMDEC'].values.std())
         self.initial_params['pmdec_spline_points'] = self.pmdec_fit(self.phi1_spline_points)
@@ -2520,30 +2540,17 @@ class MCMeta:
         self.param_labels = ['pstream', 'vgsr_spline_points', 'lsigvgsr', 'feh1', 'lsigfeh', 
             'pmra_spline_points', 'lsigpmra', 'pmdec_spline_points', 'lsigpmdec',
                 'bv', 'lsigbv', 'bfeh', 'lsigbfeh', 'bpmra', 'lsigbpmra', 'bpmdec', 'lsigbpmdec']
-        
-        # Configure spline settings for unified function
-        self.spline_config = {
-            'spline_x_points': self.phi1_spline_points,
-            'k': self.spline_k,
-            'reshape_arr_shape': self.array_lengths,
-            'trunc_bounds': {
-                'vgsr_trunc': self.vgsr_trunc,
-                'feh_trunc': self.feh_trunc,
-                'pmra_trunc': self.pmra_trunc,
-                'pmdec_trunc': self.pmdec_trunc
-            }
-        }
-        
-        optfunc = lambda theta: -stream_funcs.unified_lnprob(
-            theta, self.prior_arr, 
+        optfunc = lambda theta: -stream_funcs.spline_lnprob_1D(
+            theta, self.prior_arr, self.phi1_spline_points,  # Only phi1_spline_points needed
             self.stream.data.desi_data['VGSR'], self.stream.data.desi_data['VRAD_ERR'],
             self.stream.data.desi_data['FEH'], self.stream.data.desi_data['FEH_ERR'],
             self.stream.data.desi_data['PMRA'], self.stream.data.desi_data['PMRA_ERROR'],
             self.stream.data.desi_data['PMDEC'], self.stream.data.desi_data['PMDEC_ERROR'],
             self.stream.data.desi_data['phi1'], 
-            pmcorr=np.zeros_like(self.stream.data.desi_data['phi1']),  # Add pmcorr
-            mode='spline_1d', pm_model='1d', spline_config=self.spline_config,
-            fit_feh=True, truncated=True, assert_prior=False
+            trunc_fit=True, feh_fit=True, assert_prior=False, k=self.spline_k, 
+            reshape_arr_shape=self.array_lengths,
+            vgsr_trunc=self.vgsr_trunc, feh_trunc=self.feh_trunc, 
+            pmra_trunc=self.pmra_trunc, pmdec_trunc=self.pmdec_trunc
         )
         # Run optimization
         print("Running optimization...")
@@ -2577,26 +2584,26 @@ class MCMeta:
 
         # Generate walker positions around the starting point
         p0s = np.random.multivariate_normal(self.p0, np.diag(self.ep0)**2, size=self.nwalkers)
-        # Ensure the first parameter (pstream) is always positive
-        p0s[:, 0] = np.abs(p0s[:, 0])
-        # Clip all walker positions to be within their prior ranges
-        # for i in range(len(self.prior_arr)):
-        #     min_val, max_val = self.prior_arr[i]
-        #     # Add a small buffer to avoid being exactly on the boundary
-        #     buffer = 1e-7
-        #     p0s[:, i] = np.clip(p0s[:, i], min_val + buffer, max_val - buffer)
 
-        # Test likelihood for all walkers using the unified function
-        lkhds = [stream_funcs.unified_lnprob(
-            p0s[j], self.prior_arr, 
+        # Clip all walker positions to be within their prior ranges
+        for i in range(len(self.prior_arr)):
+            min_val, max_val = self.prior_arr[i]
+            # Add a small buffer to avoid being exactly on the boundary
+            buffer = 1e-7
+            p0s[:, i] = np.clip(p0s[:, i], min_val + buffer, max_val - buffer)
+
+        # Test likelihood for all walkers using the modified function
+        lkhds = [stream_funcs.spline_lnprob_1D(
+            p0s[j], self.prior_arr, self.phi1_spline_points, 
             self.stream.data.desi_data['VGSR'], self.stream.data.desi_data['VRAD_ERR'],
             self.stream.data.desi_data['FEH'], self.stream.data.desi_data['FEH_ERR'],
             self.stream.data.desi_data['PMRA'], self.stream.data.desi_data['PMRA_ERROR'],
             self.stream.data.desi_data['PMDEC'], self.stream.data.desi_data['PMDEC_ERROR'],
             self.stream.data.desi_data['phi1'], 
-            pmcorr=np.zeros_like(self.stream.data.desi_data['phi1']),  # Add pmcorr
-            mode='spline_1d', pm_model='1d', spline_config=self.spline_config,
-            fit_feh=True, truncated=True, assert_prior=True
+            trunc_fit=True, feh_fit=True, assert_prior=True, k=self.spline_k, 
+            reshape_arr_shape=self.array_lengths,
+            vgsr_trunc=self.vgsr_trunc, feh_trunc=self.feh_trunc, 
+            pmra_trunc=self.pmra_trunc, pmdec_trunc=self.pmdec_trunc
         ) for j in range(self.nwalkers)]
 
         # Check if prior is good - this is the key test from your original code
@@ -2659,37 +2666,16 @@ class MCMC:
             p0s[:,0] = np.clip(p0s[:,0], 1e-10, 1 - 1e-10)
                 
             start = time.time()
-            
-            # Create wrapper function for emcee that uses unified_lnprob
-            def lnprob_wrapper(theta, prior_arr, spline_config, data_dict):
-                return stream_funcs.unified_lnprob(
-                    theta, prior_arr,
-                    data_dict['vgsr'], data_dict['vgsr_err'],
-                    data_dict['feh'], data_dict['feh_err'],
-                    data_dict['pmra'], data_dict['pmra_err'],
-                    data_dict['pmdec'], data_dict['pmdec_err'],
-                    data_dict['phi1'], data_dict['pmcorr'],
-                    mode='spline_1d', pm_model='1d', spline_config=spline_config,
-                    fit_feh=True, truncated=True, assert_prior=False
-                )
-            
-            # Package data for the wrapper
-            data_dict = {
-                'vgsr': self.meta.stream.data.desi_data['VGSR'].values,
-                'vgsr_err': self.meta.stream.data.desi_data['VRAD_ERR'].values,
-                'feh': self.meta.stream.data.desi_data['FEH'].values,
-                'feh_err': self.meta.stream.data.desi_data['FEH_ERR'].values,
-                'pmra': self.meta.stream.data.desi_data['PMRA'].values,
-                'pmra_err': self.meta.stream.data.desi_data['PMRA_ERROR'].values,
-                'pmdec': self.meta.stream.data.desi_data['PMDEC'].values,
-                'pmdec_err': self.meta.stream.data.desi_data['PMDEC_ERROR'].values,
-                'phi1': self.meta.stream.data.desi_data['phi1'].values,
-                'pmcorr': np.zeros_like(self.meta.stream.data.desi_data['phi1'].values)
-            }
-            
             es = emcee.EnsembleSampler(
-                self.meta.nwalkers, len(self.meta.flat_p0_guess), lnprob_wrapper,
-                args=(self.meta.prior_arr, self.meta.spline_config, data_dict),
+                self.meta.nwalkers, len(self.meta.flat_p0_guess), stream_funcs.spline_lnprob_1D,
+                args=(self.meta.prior_arr, self.meta.phi1_spline_points, 
+                    self.meta.stream.data.desi_data['VGSR'].values, self.meta.stream.data.desi_data['VRAD_ERR'].values,
+                    self.meta.stream.data.desi_data['FEH'].values, self.meta.stream.data.desi_data['FEH_ERR'].values,
+                    self.meta.stream.data.desi_data['PMRA'].values, self.meta.stream.data.desi_data['PMRA_ERROR'].values,
+                    self.meta.stream.data.desi_data['PMDEC'].values, self.meta.stream.data.desi_data['PMDEC_ERROR'].values,
+                    self.meta.stream.data.desi_data['phi1'].values, 
+                    True, False, True, self.meta.spline_k, self.meta.array_lengths,
+                    self.meta.vgsr_trunc, self.meta.feh_trunc, self.meta.pmra_trunc, self.meta.pmdec_trunc),
                 pool=pool, backend=self.backend)
             PP = es.run_mcmc(p0s, nburnin)
             print(f'Took {(time.time()-start):.1f} seconds ({(time.time()-start)/60:.1f} minutes)')
@@ -2786,17 +2772,21 @@ class MCMC:
             i += 1
 
     def memprob(self):
-        #Calculate membership probabilities using the unified membership function
-        
+        #Calculate membership probabilities using the new spline_memprob_1D function
+        from stream_functions import spline_memprob_1D
+
         # Get the data from the stream object that was optimized
         data = self.stream.data.desi_data
 
         # Extract the relevant parameters from the MCMC results
         theta_final = list(self.meds.values())  # Use the median parameters from MCMC
 
-        # Calculate membership probabilities using unified function
-        stream_prob = stream_funcs.unified_memprob(
+        # Calculate membership probabilities
+        stream_prob = stream_funcs.spline_memprob_1D(
             theta=theta_final,
+            spline_x_points=self.meta.phi1_spline_points,
+            pstream_spline_x_points=self.meta.phi1_spline_points,  # Use same spline points for pstream
+            lsig_vgsr_spline_points=self.meta.phi1_spline_points,  # Use same spline points for lsig_vgsr
             vgsr=data['VGSR'].values,
             vgsr_err=data['VRAD_ERR'].values,
             feh=data['FEH'].values,
@@ -2806,9 +2796,13 @@ class MCMC:
             pmdec=data['PMDEC'].values,
             pmdec_err=data['PMDEC_ERROR'].values,
             phi1=data['phi1'].values,
-            pmcorr=np.zeros_like(data['phi1'].values),  # Add pmcorr
-            mode='spline_1d', pm_model='1d', spline_config=self.meta.spline_config,
-            fit_feh=True, truncated=True, return_lik=False
+            trunc_fit=True,  # Use truncated fitting as in your setup
+            reshape_arr_shape=self.meta.array_lengths,
+            k=self.meta.spline_k,
+            vgsr_trunc=self.meta.vgsr_trunc,
+            feh_trunc=self.meta.feh_trunc,
+            pmra_trunc=self.meta.pmra_trunc,
+            pmdec_trunc=self.meta.pmdec_trunc
         )
 
         print(f"Calculated membership probabilities for {len(stream_prob)} stars")
