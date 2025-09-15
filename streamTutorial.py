@@ -30,55 +30,61 @@ warnings.filterwarnings("ignore", category=AstropyDeprecationWarning, module='ga
 
 
 class Data:
-    def __init__(self, desi_path, sf_path='/raid/catalogs/streamfinder_gaiadr3.fits'):
+    def __init__(self, desi_path, sf_path='/raid/catalogs/streamfinder_gaiadr3.fits', cleaned_data=False):
         self.desi_path = desi_path
         self.sf_path = sf_path
-        decals_path = '/raid/DESI/catalogs/loa/rv_output/241119/legacyphot-loa-241126.fits'
-        self.decals_data = stream_funcs.load_fits_columns(decals_path, ['EBV', 'FLUX_G', 'FLUX_R', 'FLUX_Z'])
-        # These are the columns from the DESI data that we want to import
-        desired_columns = [
-        'VRAD', 'VRAD_ERR', 'RVS_WARN', 'TEFF', 'LOGG', ## TEFF and LOGG needed for FeH correction
-        'RR_SPECTYPE', 
-        'TARGET_RA', 'TARGET_DEC', 'FEH', 'FEH_ERR',
-        'TARGETID', 'PRIMARY',
-        'SOURCE_ID', 'PMRA', 'PMRA_ERROR', 'PMDEC', 'PMDEC_ERROR', 'PARALLAX', 'PARALLAX_ERROR', 'PMRA_PMDEC_CORR'
-        ]
-        desi_hdu_indices = [1,3,4]
-        self.desi_vrad_data = stream_funcs.load_fits_columns(desi_path, desired_columns, desi_hdu_indices)
-        self.desi_vrad_data.label='DESI'
-        self.desi_data = table.hstack([self.desi_vrad_data, self.decals_data]) 
-        # Drop the rows with NaN values in all columns
-        print(f"Length of DESI Data before Cuts: {len(self.desi_data)}")
-        self.desi_data = stream_funcs.dropna_Table(self.desi_data, columns = desired_columns)
-        self.desi_data = self.desi_data[(self.desi_data['RVS_WARN'] == 0) & (self.desi_data['RR_SPECTYPE'] == 'STAR') & (self.desi_data['PRIMARY']) &\
-        (self.desi_data['VRAD_ERR'] < 10) & (self.desi_data['FEH_ERR'] < 0.5)] 
-        self.desi_data.remove_columns(['RVS_WARN', 'RR_SPECTYPE'])
-        self.desi_data = self.desi_data.to_pandas()
-        # remove stars with FLUX_G and FLUX_R as NaN
-        self.desi_data = self.desi_data[~self.desi_data['FLUX_G'].isna() | ~self.desi_data['FLUX_R'].isna() |  ~self.desi_data['EBV'].isna()]
+        if not cleaned_data:
+            decals_path = '/raid/DESI/catalogs/loa/rv_output/241119/legacyphot-loa-241126.fits'
+            self.decals_data = stream_funcs.load_fits_columns(decals_path, ['EBV', 'FLUX_G', 'FLUX_R', 'FLUX_Z'])
+            # These are the columns from the DESI data that we want to import
+            desired_columns = [
+            'VRAD', 'VRAD_ERR', 'RVS_WARN', 'TEFF', 'LOGG', ## TEFF and LOGG needed for FeH correction
+            'RR_SPECTYPE', 
+            'TARGET_RA', 'TARGET_DEC', 'FEH', 'FEH_ERR',
+            'TARGETID', 'PRIMARY',
+            'SOURCE_ID', 'PMRA', 'PMRA_ERROR', 'PMDEC', 'PMDEC_ERROR', 'PARALLAX', 'PARALLAX_ERROR', 'PMRA_PMDEC_CORR'
+            ]
+            desi_hdu_indices = [1,3,4]
+            self.desi_vrad_data = stream_funcs.load_fits_columns(desi_path, desired_columns, desi_hdu_indices)
+            self.desi_vrad_data.label='DESI'
+            self.desi_data = table.hstack([self.desi_vrad_data, self.decals_data]) 
+            # Drop the rows with NaN values in all columns
+            print(f"Length of DESI Data before Cuts: {len(self.desi_data)}")
+            self.desi_data = stream_funcs.dropna_Table(self.desi_data, columns = desired_columns)
+            self.desi_data = self.desi_data[(self.desi_data['RVS_WARN'] == 0) & (self.desi_data['RR_SPECTYPE'] == 'STAR') & (self.desi_data['PRIMARY']) &\
+            (self.desi_data['VRAD_ERR'] < 10) & (self.desi_data['FEH_ERR'] < 0.5)] 
+            self.desi_data.remove_columns(['RVS_WARN', 'RR_SPECTYPE'])
+            self.desi_data = self.desi_data.to_pandas()
+            # remove stars with FLUX_G and FLUX_R as NaN
+            self.desi_data = self.desi_data[~self.desi_data['FLUX_G'].isna() | ~self.desi_data['FLUX_R'].isna() |  ~self.desi_data['EBV'].isna()]
+            
+            print(f"Length after NaN cut: {len(self.desi_data)}")
         
-        print(f"Length after NaN cut: {len(self.desi_data)}")
 
-        # Applying additional errors in quadrature
-        self.desi_data['VRAD_ERR'] = np.sqrt(self.desi_data['VRAD_ERR']**2 + 0.9**2) ### Turn into its own column
-        self.desi_data['PMRA_ERROR'] = np.sqrt(self.desi_data['PMRA_ERROR']**2 + (np.sqrt(550)*0.001)**2) ### Turn into its own column
-        self.desi_data['PMDEC_ERROR'] = np.sqrt(self.desi_data['PMDEC_ERROR']**2 + (np.sqrt(550)*0.001)**2) ### Turn into its own column
-        self.desi_data['FEH_ERR'] = np.sqrt(self.desi_data['FEH_ERR']**2 + 0.01**2) ### Turn into its own column
+            # Applying additional errors in quadrature
+            self.desi_data['VRAD_ERR'] = np.sqrt(self.desi_data['VRAD_ERR']**2 + 0.9**2) ### Turn into its own column
+            self.desi_data['PMRA_ERROR'] = np.sqrt(self.desi_data['PMRA_ERROR']**2 + (np.sqrt(550)*0.001)**2) ### Turn into its own column
+            self.desi_data['PMDEC_ERROR'] = np.sqrt(self.desi_data['PMDEC_ERROR']**2 + (np.sqrt(550)*0.001)**2) ### Turn into its own column
+            self.desi_data['FEH_ERR'] = np.sqrt(self.desi_data['FEH_ERR']**2 + 0.01**2) ### Turn into its own column
 
 
-        # # Apply Metallicity correction to the DR1 Data (See Section 4.2 https://arxiv.org/pdf/2505.14787)
-        # print("Adding empirical FEH calibration (can find uncalibrated data in column['FEH_uncalib])")
-        # self.desi_data['FEH_uncalib'] = self.desi_data['FEH']
-        # self.desi_data['FEH'] = feh_correct.calibrate(self.desi_data['FEH'], self.desi_data['TEFF'], self.desi_data['LOGG'])
-        
-        # Switch to VGSR instead of VRAD
-        self.desi_data['VGSR'] = np.array(
-            stream_funcs.vhel_to_vgsr(
-                np.array(self.desi_data['TARGET_RA']) * u.deg,
-                np.array(self.desi_data['TARGET_DEC']) * u.deg,
-                np.array(self.desi_data['VRAD']) * (u.km / u.s),
-            ).value
-        )
+            # # Apply Metallicity correction to the DR1 Data (See Section 4.2 https://arxiv.org/pdf/2505.14787)
+            # print("Adding empirical FEH calibration (can find uncalibrated data in column['FEH_uncalib])")
+            # self.desi_data['FEH_uncalib'] = self.desi_data['FEH']
+            # self.desi_data['FEH'] = feh_correct.calibrate(self.desi_data['FEH'], self.desi_data['TEFF'], self.desi_data['LOGG'])
+            
+            # Switch to VGSR instead of VRAD
+            self.desi_data['VGSR'] = np.array(
+                stream_funcs.vhel_to_vgsr(
+                    np.array(self.desi_data['TARGET_RA']) * u.deg,
+                    np.array(self.desi_data['TARGET_DEC']) * u.deg,
+                    np.array(self.desi_data['VRAD']) * (u.km / u.s),
+                ).value
+            )
+        else:
+            desi_data_tbl = table.Table.read(self.desi_path, format='fits')
+            self.desi_data = pd.DataFrame(desi_data_tbl.as_array())
+
 
         # Lets load the STREAMFINDER data for Gaia DR3
         if sf_path:
@@ -1164,6 +1170,9 @@ class StreamPlotter:
         # Residuals mode prep (only applicable with MCMC splines in stream frame)
         residual_mode = False
         preds = {'desi': {}, 'sf': {}, 'sf_cut': {}, 'sf_only': {}}
+        # Prepare holders so we can later use MCMC spline ranges for y-limit logic ("faded blue regions")
+        vgsr_mcmc = pmra_mcmc = pmdec_mcmc = feh_mcmc = None
+        sigma_vgsr = sigma_pmra = sigma_pmdec = sigma_feh = None
         if mcmc_object is not None:
                 meds = mcmc_object.meds
                 ep = mcmc_object.ep
@@ -1645,63 +1654,79 @@ class StreamPlotter:
                     else:
                         ax[4].set_ylim(-1, 1)
 
-        # Set y-axis limits based on stream data if available (fallback for non-residuals)
+        # Set y-axis limits (non-residual mode) based on member stars OR faded blue MCMC regions (whichever extends further)
         if not residual_mode:
-            # Use membership probabilities to set y-limits if available
+            pad_settings = self.plot_params.get('limits', {})
+            pad_v = pad_settings.get('nonresidual_pad_vgsr', 50)
+            pad_pm = pad_settings.get('nonresidual_pad_pm', 5)
+            pad_feh = pad_settings.get('nonresidual_pad_feh', 0.5)
+            feh_default = pad_settings.get('feh_ylim_default', (-4, -0.5))
+
+            member_idx = None
             if show_membership_prob and stream_prob is not None:
                 high_prob_mask = stream_prob >= min_prob
-                high_prob_indices = np.where(high_prob_mask)[0]
-                if len(high_prob_indices) > 0:
-                    # Get padding values from plot params
-                    pad_v = self.plot_params.get('limits', {}).get('nonresidual_pad_vgsr', 50)
-                    pad_pm = self.plot_params.get('limits', {}).get('nonresidual_pad_pm', 5)
-                    pad_feh = self.plot_params.get('limits', {}).get('nonresidual_pad_feh', 0.5)
-                    
-                    # Get data from high-probability member stars
-                    member_vgsr = self.data.desi_data['VGSR'].iloc[high_prob_indices]
-                    member_pmra = self.data.desi_data['PMRA'].iloc[high_prob_indices]
-                    member_pmdec = self.data.desi_data['PMDEC'].iloc[high_prob_indices]
-                    
-                    # Set limits based on member star ranges with padding
-                    ax[1].set_ylim(np.nanmin(member_vgsr) - pad_v, np.nanmax(member_vgsr) + pad_v)
-                    ax[2].set_ylim(np.nanmin(member_pmra) - pad_pm, np.nanmax(member_pmra) + pad_pm)
-                    ax[3].set_ylim(np.nanmin(member_pmdec) - pad_pm, np.nanmax(member_pmdec) + pad_pm)
-                    
-                    # Handle metallicity if available
-                    if 'FEH' in self.data.desi_data.columns:
-                        member_feh = self.data.desi_data['FEH'].iloc[high_prob_indices]
-                        if len(member_feh.dropna()) > 0:
-                            ax[4].set_ylim(np.nanmin(member_feh) - pad_feh, np.nanmax(member_feh) + pad_feh)
-                        else:
-                            feh_ylim = self.plot_params.get('limits', {}).get('feh_ylim_default', (-4, -0.5))
-                            ax[4].set_ylim(*feh_ylim)
-                    else:
-                        feh_ylim = self.plot_params.get('limits', {}).get('feh_ylim_default', (-4, -0.5))
-                        ax[4].set_ylim(*feh_ylim)
-            
-            # Fallback to StreamFinder data if no membership probabilities but showStream is True
-            elif showStream and hasattr(self.data, 'confirmed_sf_and_desi') and len(self.data.confirmed_sf_and_desi) > 0:
-                # VGSR limits
-                vgsr_data = [self.data.confirmed_sf_and_desi['VGSR']]
-                if hasattr(self.data, 'cut_confirmed_sf_and_desi') and len(self.data.cut_confirmed_sf_and_desi) > 0 and show_cut:
-                    vgsr_data.append(self.data.cut_confirmed_sf_and_desi['VGSR'])
-                vgsr_combined = np.concatenate([np.array(x) for x in vgsr_data])
-                ax[1].set_ylim(np.nanmin(vgsr_combined) - 50, np.nanmax(vgsr_combined) + 50)
-                
-                # Proper motion limits  
-                pmra_data = [self.data.confirmed_sf_and_desi['PMRA']]
-                pmdec_data = [self.data.confirmed_sf_and_desi['PMDEC']]
-                if hasattr(self.data, 'cut_confirmed_sf_and_desi') and len(self.data.cut_confirmed_sf_and_desi) > 0 and show_cut:
-                    pmra_data.append(self.data.cut_confirmed_sf_and_desi['PMRA'])
-                    pmdec_data.append(self.data.cut_confirmed_sf_and_desi['PMDEC'])
-                pmra_combined = np.concatenate([np.array(x) for x in pmra_data])
-                pmdec_combined = np.concatenate([np.array(x) for x in pmdec_data])
-                ax[2].set_ylim(np.nanmin(pmra_combined) - 5, np.nanmax(pmra_combined) + 5)
-                ax[3].set_ylim(np.nanmin(pmdec_combined) - 5, np.nanmax(pmdec_combined) + 5)
+                member_idx = np.where(high_prob_mask)[0]
+            elif showStream and hasattr(self.data, 'confirmed_sf_and_desi'):
+                member_idx = self.data.confirmed_sf_and_desi.index
 
-                # Set metallicity limits (non-residuals default)
-                feh_ylim = self.plot_params.get('limits', {}).get('feh_ylim_default', (-4, -0.5))
-                ax[4].set_ylim(*feh_ylim)
+            # Helper to compute combined min/max including MCMC fill regions
+            def combine_range(member_values, mcmc_curve, sigma):
+                vals = []
+                if member_values is not None and len(member_values) > 0:
+                    vals.append(member_values.values if hasattr(member_values, 'values') else np.array(member_values))
+                if (mcmc_curve is not None) and (sigma is not None):
+                    # Include +/-2 sigma envelope (faded blue outer region)
+                    vals.append(mcmc_curve - 2 * sigma)
+                    vals.append(mcmc_curve + 2 * sigma)
+                if len(vals) == 0:
+                    return None
+                allv = np.concatenate([np.array(v, dtype=float).ravel() for v in vals])
+                # Remove NaNs
+                allv = allv[~np.isnan(allv)]
+                if len(allv) == 0:
+                    return None
+                return float(np.nanmin(allv)), float(np.nanmax(allv))
+
+            # Build member value series
+            member_vgsr = member_pmra = member_pmdec = member_feh = None
+            if member_idx is not None and len(member_idx) > 0:
+                if show_membership_prob and stream_prob is not None:
+                    # member_idx are DESI row indices
+                    member_vgsr = self.data.desi_data['VGSR'].iloc[member_idx]
+                    member_pmra = self.data.desi_data['PMRA'].iloc[member_idx]
+                    member_pmdec = self.data.desi_data['PMDEC'].iloc[member_idx]
+                    if 'FEH' in self.data.desi_data.columns:
+                        member_feh = self.data.desi_data['FEH'].iloc[member_idx]
+                else:
+                    # StreamFinder confirmed members
+                    member_vgsr = self.data.confirmed_sf_and_desi['VGSR']
+                    member_pmra = self.data.confirmed_sf_and_desi['PMRA']
+                    member_pmdec = self.data.confirmed_sf_and_desi['PMDEC']
+                    if 'FEH' in self.data.desi_data.columns:
+                        member_feh = self.data.desi_data['FEH'] if 'FEH' in self.data.desi_data else None
+                    # Optionally include cut stars to extend range
+                    if hasattr(self.data, 'cut_confirmed_sf_and_desi') and show_cut and len(self.data.cut_confirmed_sf_and_desi) > 0:
+                        member_vgsr = pd.concat([member_vgsr, self.data.cut_confirmed_sf_and_desi['VGSR']])
+                        member_pmra = pd.concat([member_pmra, self.data.cut_confirmed_sf_and_desi['PMRA']])
+                        member_pmdec = pd.concat([member_pmdec, self.data.cut_confirmed_sf_and_desi['PMDEC']])
+
+            # Determine combined ranges
+            vgsr_range = combine_range(member_vgsr, vgsr_mcmc, sigma_vgsr)
+            pmra_range = combine_range(member_pmra, pmra_mcmc, sigma_pmra)
+            pmdec_range = combine_range(member_pmdec, pmdec_mcmc, sigma_pmdec)
+            feh_range = combine_range(member_feh, feh_mcmc, sigma_feh) if member_feh is not None else None
+
+            # Apply ranges with padding; fall back gracefully if None
+            if vgsr_range is not None:
+                ax[1].set_ylim(vgsr_range[0] - pad_v, vgsr_range[1] + pad_v)
+            if pmra_range is not None:
+                ax[2].set_ylim(pmra_range[0] - pad_pm, pmra_range[1] + pad_pm)
+            if pmdec_range is not None:
+                ax[3].set_ylim(pmdec_range[0] - pad_pm, pmdec_range[1] + pad_pm)
+            if feh_range is not None:
+                ax[4].set_ylim(feh_range[0] - pad_feh, feh_range[1] + pad_feh)
+            else:
+                ax[4].set_ylim(*feh_default)
         
         # Plot splines if requested and available
         if (show_initial_splines or show_optimized_splines or show_mcmc_splines) and stream_frame and self.mcmeta is not None:
@@ -2669,7 +2694,6 @@ class MCMC:
             start_label = "initial_guess"
 
         with Pool(self.nproc) as pool:
-            print(f"Running a single continuous chain for {self.nsteps} iterations starting from {start_label} parameters...")
             p0 = start_params
             ep0 = np.zeros(len(p0)) + 0.01
             assert np.all(np.isfinite(start_params)), "start_params contains NaN or inf"
@@ -2687,6 +2711,7 @@ class MCMC:
             p0s[:,0] = np.clip(p0s[:,0], 1e-10, 1 - 1e-10)
                 
             start = time.time()
+            print(f"Running a single continuous chain for {self.nsteps} iterations starting from {start_label} parameters...")
             es = emcee.EnsembleSampler(
                 self.meta.nwalkers, len(self.meta.flat_p0_guess), stream_funcs.spline_lnprob_1D,
                 args=(self.meta.prior_arr, self.meta.phi1_spline_points, 
