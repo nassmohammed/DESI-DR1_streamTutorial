@@ -2638,12 +2638,27 @@ class MCMC:
         self.backend = emcee.backends.HDFBackend(self.output_dir+'/'+self.stream.streamName+str(self.meta.no_of_spline_points)+'.h5')
         self.backend.reset(self.meta.nwalkers,len(self.meta.p0))
     #WIP
-    def run(self, nproc=32, nburnin=5000, nstep=5000, use_optimized_start=True):
+    def run(self, nproc=32, nsteps=10000, use_optimized_start=True, **kwargs):
+        """
+        Run a single continuous MCMC chain for `nsteps` iterations. Burn-in can
+        be applied later using `apply_burnin(discard, thin)`.
+
+        Backward compatibility: if called with legacy keywords `nburnin` and
+        `nstep`, we will ignore the two-phase pattern and instead run for
+        `nsteps = nburnin + nstep`.
+        """
         from multiprocessing import Pool
         self.nproc = nproc
-        self.nburnin = nburnin
-        self.nstep = nstep
         self.use_optimized_start = use_optimized_start
+
+        # Back-compat: allow old signature nburnin+nstep
+        if 'nburnin' in kwargs or 'nstep' in kwargs:
+            nburnin_legacy = int(kwargs.get('nburnin', 0) or 0)
+            nstep_legacy = int(kwargs.get('nstep', 0) or 0)
+            nsteps = nburnin_legacy + nstep_legacy if (nburnin_legacy + nstep_legacy) > 0 else nsteps
+            print(f"[MCMC] Back-compat: using nsteps = nburnin({nburnin_legacy}) + nstep({nstep_legacy}) = {nsteps}")
+
+        self.nsteps = int(nsteps)
         if self.use_optimized_start:
             print("Using optimized parameters as starting positions...")
             start_params = self.meta.sp_result.x
@@ -2654,7 +2669,7 @@ class MCMC:
             start_label = "initial_guess"
 
         with Pool(self.nproc) as pool:
-            print(f"Running burn-in with {self.nburnin} iterations. starting from {start_label} parameters...")
+            print(f"Running a single continuous chain for {self.nsteps} iterations starting from {start_label} parameters...")
             p0 = start_params
             ep0 = np.zeros(len(p0)) + 0.01
             assert np.all(np.isfinite(start_params)), "start_params contains NaN or inf"
@@ -2683,50 +2698,149 @@ class MCMC:
                     True, False, True, self.meta.spline_k, self.meta.array_lengths,
                     self.meta.vgsr_trunc, self.meta.feh_trunc, self.meta.pmra_trunc, self.meta.pmdec_trunc),
                 pool=pool, backend=self.backend)
-            PP = es.run_mcmc(p0s, nburnin)
+            _ = es.run_mcmc(p0s, self.nsteps)
             print(f'Took {(time.time()-start):.1f} seconds ({(time.time()-start)/60:.1f} minutes)')
-            
-            print(f'Now sampling with {nstep} iterations')
-            es.reset()
-            start = time.time()
-            es.run_mcmc(PP.coords, nstep)
-            print(f'Took {(time.time()-start):.1f} seconds ({(time.time()-start)/60:.1f} minutes)')
-            
-            self.chain = es.chain
-            print('Getting flatchain...')
-            self.flatchain = es.flatchain
+
+            # Store chains in the shape expected by show_chains(): (nwalkers, nsteps, ndim)
+            try:
+                chain_arr = es.get_chain()  # (nsteps, nwalkers, ndim)
+                self.chain = np.swapaxes(chain_arr, 0, 1)
+            except Exception:
+                # Fallback to legacy attributes if available
+                self.chain = getattr(es, 'chain', None)
+
+            print('Computing flatchain (no burn-in discarded; use apply_burnin to change)...')
+            try:
+                self.flatchain = es.get_chain(flat=True)
+            except Exception:
+                self.flatchain = getattr(es, 'flatchain', None)
+
+            # Track current discard/thin used to compute flatchain
+            self.current_discard = 0
+            self.current_thin = 1
+
+    def apply_burnin(self, discard=0, thin=1):
+        """
+        Apply burn-in and thinning post-hoc to set `self.flatchain` from the
+        stored backend; updates `current_discard` and `current_thin`.
+        """
+        try:
+            # Access the sampler via the backend
+            if hasattr(self, 'backend'):
+                # emcee provides a convenience method on the backend
+                chain_arr = self.backend.get_chain(discard=discard, thin=thin, flat=True)
+            else:
+                raise AttributeError('No backend found on MCMC object')
+        except Exception:
+            # Fallback: if we have the full non-flat chain in self.chain
+            chain_local = getattr(self, 'chain', None)
+            if chain_local is None:
+                raise RuntimeError('No chain available to apply burn-in to.')
+            # self.chain is (nwalkers, nsteps, ndim); apply discard/thin
+            chain_swapped = np.swapaxes(chain_local, 0, 1)  # (nsteps, nwalkers, ndim)
+            chain_cut = chain_swapped[discard::thin]
+            chain_arr = chain_cut.reshape(-1, chain_cut.shape[-1])
+
+        self.flatchain = chain_arr
+        self.current_discard = int(discard)
+        self.current_thin = int(thin)
+        print(f"Applied burn-in: discard={self.current_discard}, thin={self.current_thin}. Flatchain shape: {self.flatchain.shape}")
     
-    def show_chains(self):
+    def show_chains(self, trimmed=False):
         indices = np.arange(1, self.meta.no_of_spline_points + 1).astype(str)
         velocity_labels = ['vgsr' + i for i in indices]
-        pmra_labels = ['pmra' + i for i in indices] 
+        pmra_labels = ['pmra' + i for i in indices]
         pmdec_labels = ['pmdec' + i for i in indices]
 
-        self.expanded_param_labels = (['pstream'] + 
-                                velocity_labels + 
-                                ['lsigvgsr', 'feh1', 'lsigfeh'] +
-                                pmra_labels + 
-                                ['lsigpmra'] +
-                                pmdec_labels +
-                                ['lsigpmdec', 'bv', 'lsigbv', 'bfeh', 'lsigbfeh', 'bpmra', 'lsigbpmra', 'bpmdec', 'lsigbpmdec'])
+        self.expanded_param_labels = (
+            ['pstream'] +
+            velocity_labels +
+            ['lsigvgsr', 'feh1', 'lsigfeh'] +
+            pmra_labels +
+            ['lsigpmra'] +
+            pmdec_labels +
+            ['lsigpmdec', 'bv', 'lsigbv', 'bfeh', 'lsigbfeh', 'bpmra', 'lsigbpmra', 'bpmdec', 'lsigbpmdec']
+        )
 
-        Nrow = self.chain.shape[2]
-        fig, axes = plt.subplots(Nrow, figsize=(6,2*Nrow))
+        # Fetch raw or trimmed chain from backend/in-memory
+        if trimmed:
+            discard = int(getattr(self, 'current_discard', 0))
+            thin = int(getattr(self, 'current_thin', 1))
+            chain = None
+            try:
+                # (nsteps_trim, nwalkers, ndim)
+                chain_backend = self.backend.get_chain(discard=discard, thin=thin, flat=False)
+                chain = np.swapaxes(chain_backend, 0, 1)  # -> (nwalkers, nsteps_trim, ndim)
+            except Exception:
+                pass
+            if chain is None:
+                chain_local = getattr(self, 'chain', None)
+                if chain_local is None:
+                    raise RuntimeError('No MCMC chain available. Run mcmc.run() first.')
+                chain_swapped = np.swapaxes(chain_local, 0, 1)  # (nsteps, nwalkers, ndim)
+                chain_cut = chain_swapped[discard::thin]
+                chain = np.swapaxes(chain_cut, 0, 1)  # back to (nwalkers, nsteps_trim, ndim)
+        else:
+            chain = None
+            try:
+                # (nsteps, nwalkers, ndim)
+                chain_backend = self.backend.get_chain(flat=False)
+                chain = np.swapaxes(chain_backend, 0, 1)  # -> (nwalkers, nsteps, ndim)
+            except Exception:
+                pass
+            if chain is None:
+                chain = getattr(self, 'chain', None)
+            if chain is None:
+                raise RuntimeError('No MCMC chain available. Run mcmc.run() first.')
 
+        chain = np.asarray(chain)
+        Nrow = chain.shape[2]
+        fig, axes = plt.subplots(Nrow, figsize=(6, 2 * Nrow))
+        if Nrow == 1:
+            axes = [axes]
 
-        for iparam,ax in enumerate(axes):
+        for iparam, ax in enumerate(axes):
             for j in range(self.meta.nwalkers):
-                ax.plot(self.chain[j,:,iparam], lw=.5, alpha=.2)
-                ax.set_ylabel(self.expanded_param_labels[iparam])
+                ax.plot(chain[j, :, iparam], lw=.5, alpha=.2)
+            ax.set_ylabel(self.expanded_param_labels[iparam])
 
         fig.tight_layout()
 
     def show_corner(self):
-        flatchain = self.flatchain
-        flatchain.shape
+        # Prefer any user-filtered flatchain (from apply_burnin), else fallback to backend
+        flatchain = getattr(self, 'flatchain', None)
+        if flatchain is None:
+            try:
+                flatchain = self.backend.get_chain(flat=True)
+            except Exception:
+                pass
+        if flatchain is None:
+            raise RuntimeError('No flatchain available. Run mcmc.run() first.')
+        _ = flatchain.shape  # ensure it's an ndarray
         fig = corner.corner(flatchain, labels=self.expanded_param_labels, quantiles=[0.16,0.50,0.84], show_titles=True)
+        
 
     def print_result(self):
+        # Ensure labels exist (in case user didn't call show_chains first)
+        if not hasattr(self, 'expanded_param_labels'):
+            indices = np.arange(1, self.meta.no_of_spline_points + 1).astype(str)
+            velocity_labels = ['vgsr' + i for i in indices]
+            pmra_labels = ['pmra' + i for i in indices] 
+            pmdec_labels = ['pmdec' + i for i in indices]
+            self.expanded_param_labels = (['pstream'] + 
+                                    velocity_labels + 
+                                    ['lsigvgsr', 'feh1', 'lsigfeh'] +
+                                    pmra_labels + 
+                                    ['lsigpmra'] +
+                                    pmdec_labels +
+                                    ['lsigpmdec', 'bv', 'lsigbv', 'bfeh', 'lsigbfeh', 'bpmra', 'lsigbpmra', 'bpmdec', 'lsigbpmdec'])
+        # Ensure flatchain is available; prefer backend with current burn-in settings if any
+        if getattr(self, 'flatchain', None) is None:
+            try:
+                self.flatchain = self.backend.get_chain(flat=True)
+            except Exception:
+                raise RuntimeError('No flatchain available. Run mcmc.run() first.')
+
         result = stream_funcs.process_chain(self.flatchain, labels = self.expanded_param_labels)
         if len(result) == 2:
             self.meds, self.errs = result
@@ -2767,14 +2881,26 @@ class MCMC:
         # print("{:<10} {:>10} {:>10} {:>10} {:>10}".format('param','med','err','exp(med)','exp(err)'))
         print("{:<10} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10}".format('param','med', 'em','ep','exp(med)', 'exp(em)','exp(ep)'))
         print('--------------------------------------------------------------------------------------')
+        em_dict = self.em if isinstance(self.em, dict) else {}
+        ep_dict = self.ep if isinstance(self.ep, dict) else {}
+        exp_em_dict = self.exp_em if isinstance(self.exp_em, dict) else {}
+        exp_ep_dict = self.exp_ep if isinstance(self.exp_ep, dict) else {}
         for label,v in self.meds.items():
             # if label[:8] == 'lpstream':
             #     print("{:<10} {:>10.3f} {:>10.3f} {:>10.5f} {:>10.5f}".format(label,v,errs[label], np.e**v, np.log(10)*(np.e**v)*errs[label]))
             if label[0] == 'l':
                 # print("{:<10} {:>10.3f} {:>10.3f} {:>10.3f} {:>10.3f} ".format(label,v,errs[label], exp_meds[label], exp_errs[label]))
-                print("{:<10} {:>10.3f} {:>10.3f} {:>10.3f} {:>10.3f} {:>10.3f} {:>10.3f}".format(label,v,self.em[label],self.ep[label], self.exp_meds[label], self.exp_em[label], self.exp_ep[label]))
+                print("{:<10} {:>10.3f} {:>10.3f} {:>10.3f} {:>10.3f} {:>10.3f} {:>10.3f}".format(
+                    label,
+                    v,
+                    em_dict.get(label, np.nan),
+                    ep_dict.get(label, np.nan),
+                    self.exp_meds[label],
+                    exp_em_dict.get(label, np.nan),
+                    exp_ep_dict.get(label, np.nan)
+                ))
             else:
-                print("{:<10} {:>10.3f} {:>10.3f} {:>10.3f}".format(label, v, self.em[label], self.ep[label]))
+                print("{:<10} {:>10.3f} {:>10.3f} {:>10.3f}".format(label, v, em_dict.get(label, np.nan), ep_dict.get(label, np.nan)))
             i += 1
 
     def memprob(self):
@@ -2826,8 +2952,11 @@ class MCMC:
         This method saves various outputs from the MCMC run including chains,
         parameters, and high-probability stream members.
         """
-        with open(self.output_dir + 'isochrone_path.txt', 'w') as f:
-            f.write(self.stream.isochrone_path)
+        # Ensure output directory ends with a slash for consistency
+        outdir = self.output_dir.rstrip('/') 
+
+        with open(outdir + '/isochrone_path.txt', 'w') as f:
+            f.write(getattr(self.stream, 'isochrone_path', ''))
 
         mcmc_dict = {
             "flatchain": self.flatchain,
@@ -2849,10 +2978,11 @@ class MCMC:
             exp_theta_final.append(self.exp_meds[label])
             errs_list.append(self.errs[label])
             exp_errs_list.append(self.exp_errs[label])
-            ep_list.append(self.ep[label])
-            em_list.append(np.abs(self.em[label]))
-            exp_ep_list.append(self.exp_ep[label])
-            exp_em_list.append(np.abs(self.exp_em[label]))
+            # Use safe dict access in case certain diagnostics aren't present
+            ep_list.append((self.ep if isinstance(self.ep, dict) else {}).get(label, np.nan))
+            em_list.append(abs((self.em if isinstance(self.em, dict) else {}).get(label, np.nan)))
+            exp_ep_list.append((self.exp_ep if isinstance(self.exp_ep, dict) else {}).get(label, np.nan))
+            exp_em_list.append(abs((self.exp_em if isinstance(self.exp_em, dict) else {}).get(label, np.nan)))
 
         nested_list_meds = stream_funcs.reshape_arr(theta_final, self.meta.array_lengths)
         nested_list_exp_meds = stream_funcs.reshape_arr(exp_theta_final, self.meta.array_lengths)
@@ -2877,30 +3007,57 @@ class MCMC:
             "expanded_param_labels": self.expanded_param_labels
         }
 
-        np.save(f'{self.output_dir}/mcmc_dict.npy', mcmc_dict)
-        np.save(f'{self.output_dir}/nested_dict.npy', nested_dict)
-        np.savetxt(self.output_dir + '/' + self.stream.streamName + '_' + str(getattr(self, 'phi2_wiggle', 'default')) + '.txt', np.array(theta_final))
+        np.save(f'{outdir}/mcmc_dict.npy', mcmc_dict)
+        np.save(f'{outdir}/nested_dict.npy', nested_dict)
+        np.savetxt(f'{outdir}/{self.stream.streamName}_{getattr(self, "phi2_wiggle", "default")}.txt', np.array(theta_final))
+
+        # Save spline points dict (user requested)
+        try:
+            phi1_spline_points = getattr(self.meta, 'phi1_spline_points', None)
+            # Prefer explicitly provided variants, else fall back to phi1_spline_points
+            pstream_phi1_spline_points = getattr(self.meta, 'pstream_phi1_spline_points', None)
+            if pstream_phi1_spline_points is None:
+                pstream_phi1_spline_points = phi1_spline_points
+
+            lsigv_phi1_spline_points = getattr(self.meta, 'lsigv_phi1_spline_points', None)
+            if lsigv_phi1_spline_points is None:
+                lsigv_phi1_spline_points = phi1_spline_points
+
+            spline_k = getattr(self.meta, 'spline_k', None)
+            spline_k_lsigv = getattr(self.meta, 'spline_k_lsigv', spline_k)
+
+            spline_points_dict = {
+                'phi1_spline_points': phi1_spline_points,
+                'pstream_phi1_spline_points': pstream_phi1_spline_points,
+                'lsigv_phi1_spline_points': lsigv_phi1_spline_points,
+                'spline_k': spline_k,
+                'spline_k_lsigv': spline_k_lsigv
+            }
+
+            np.save(f'{outdir}/spline_points_dict.npy', spline_points_dict)
+        except Exception as e:
+            print(f"Warning: could not save spline_points_dict: {e}")
 
         # Calculate membership probabilities if not already done
         if not hasattr(self, 'stream_prob'):
             self.stream_prob = self.memprob()
-        
+
         dataframe = self.stream.data.desi_data.copy()
         dataframe['stream_prob'] = self.stream_prob
 
         # Default minimum probability threshold
         min_prob = getattr(self, 'min_prob', 0.5)
-        
+
         # Save high-probability members (above min_prob threshold)
         high_prob_mask = self.stream_prob >= min_prob
         high_prob_dataframe = dataframe[high_prob_mask]
         high_prob_table = Table.from_pandas(high_prob_dataframe)
-        output_path = f'{self.output_dir}/{self.stream.streamName}_phi2_spline_{int(min_prob*100)}%_mem.fits'
+        output_path = f'{outdir}/{self.stream.streamName}_phi2_spline_{int(min_prob*100)}%_mem.fits'
         high_prob_table.write(output_path, format='fits', overwrite=True)
         print(f"Saved {len(high_prob_dataframe)} high-probability members to: {output_path}")
 
         # Save all stars with membership probabilities
         all_table = Table.from_pandas(dataframe)
-        output_path = f'{self.output_dir}/{self.stream.streamName}_phi2_spline_all%_mem.fits'
+        output_path = f'{outdir}/{self.stream.streamName}_phi2_spline_all%_mem.fits'
         all_table.write(output_path, format='fits', overwrite=True)
         print(f"Saved {len(dataframe)} total stars to: {output_path}")
