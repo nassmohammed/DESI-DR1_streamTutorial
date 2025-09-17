@@ -2492,7 +2492,7 @@ class MCMeta:
         print('Making stream initial guess based on galstream and STREAMFINDER...')
         self.initial_params['pstream'] = np.abs(len(self.sf_data)/len(self.stream.data.desi_data))
 
-        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['VGSR'].values, 2)
+        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['VGSR'].values, 1)
         self.vgsr_fit = np.poly1d(p)
         self.initial_params['lsigvgsr'] = np.log10(((self.sf_data['VGSR'].values.std())**2 - (np.mean(self.sf_data['VRAD_ERR'].values))**2)**0.5)
         self.initial_params['vgsr_spline_points'] = self.vgsr_fit(self.phi1_spline_points)
@@ -2502,13 +2502,13 @@ class MCMeta:
         self.initial_params['lsigfeh'] = np.log10(((self.sf_data['FEH'].values.std())**2 - (np.mean(self.sf_data['FEH_ERR'].values))**2)**0.5)
         print(f'Stream mean metallicity from trimmed SF: {self.initial_params["feh1"]:.2f} +- {10**self.initial_params["lsigfeh"]:.3f} dex')
 
-        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMRA'].values, 2)
+        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMRA'].values, 1)
         self.pmra_fit = np.poly1d(p)
         self.initial_params['lsigpmra'] = np.log10(((self.sf_data['PMRA'].values.std())**2 - (np.mean(self.sf_data['PMRA_ERROR'].values))**2)**0.5)
         self.initial_params['pmra_spline_points'] = self.pmra_fit(self.phi1_spline_points)
         print(f"Stream PMRA dispersion from trimmed SF: {10**self.initial_params['lsigpmra']:.2f} mas/yr")
 
-        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMDEC'].values, 2)
+        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMDEC'].values, 1)
         self.pmdec_fit = np.poly1d(p)
         self.initial_params['lsigpmdec'] = np.log10(((self.sf_data['PMDEC'].values.std())**2 - (np.mean(self.sf_data['PMDEC_ERROR'].values))**2)**0.5)
         self.initial_params['pmdec_spline_points'] = self.pmdec_fit(self.phi1_spline_points)
