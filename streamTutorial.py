@@ -30,53 +30,61 @@ warnings.filterwarnings("ignore", category=AstropyDeprecationWarning, module='ga
 
 
 class Data:
-    def __init__(self, desi_path, sf_path='/raid/catalogs/streamfinder_gaiadr3.fits'):
+    def __init__(self, desi_path, sf_path='/raid/catalogs/streamfinder_gaiadr3.fits', cleaned_data=False):
         self.desi_path = desi_path
         self.sf_path = sf_path
-
-        # These are the columns from the DESI data that we want to import
-        desired_columns = [
-        'VRAD', 'VRAD_ERR', 'RVS_WARN', 'TEFF', 'LOGG', ## TEFF and LOGG needed for FeH correction
-        'RR_SPECTYPE', 
-        'TARGET_RA', 'TARGET_DEC', 'FEH', 'FEH_ERR', 'EBV', 'FLUX_G', 'FLUX_R', 'FLUX_Z',
-        'TARGETID', 'PRIMARY', 'PHOT_BP_MEAN_FLUX', 'PHOT_RP_MEAN_FLUX',
-        'SOURCE_ID', 'PMRA', 'PMRA_ERROR', 'PMDEC', 'PMDEC_ERROR', 'PARALLAX', 'PARALLAX_ERROR', 'PMRA_PMDEC_CORR'
-        ]
-        desi_hdu_indices = [1,3,4,5]
-        self.desi_data = stream_funcs.load_fits_columns(desi_path, desired_columns, desi_hdu_indices)
-        self.desi_data.label='DESI'
-        # Drop the rows with NaN values in all columns
-        print(f"Length of DESI Data before Cuts: {len(self.desi_data)}")
-        self.desi_data = stream_funcs.dropna_Table(self.desi_data, columns = desired_columns)
-        self.desi_data = self.desi_data[(self.desi_data['RVS_WARN'] == 0) & (self.desi_data['RR_SPECTYPE'] == 'STAR') & (self.desi_data['PRIMARY']) &\
-        (self.desi_data['VRAD_ERR'] < 10) & (self.desi_data['FEH_ERR'] < 0.5)] 
-        self.desi_data.remove_columns(['RVS_WARN', 'RR_SPECTYPE'])
-        self.desi_data = self.desi_data.to_pandas()
-        # remove stars with FLUX_G and FLUX_R as NaN
-        self.desi_data = self.desi_data[~self.desi_data['FLUX_G'].isna() | ~self.desi_data['FLUX_R'].isna() |  ~self.desi_data['EBV'].isna()]
+        if not cleaned_data:
+            decals_path = '/raid/DESI/catalogs/loa/rv_output/241119/legacyphot-loa-241126.fits'
+            self.decals_data = stream_funcs.load_fits_columns(decals_path, ['EBV', 'FLUX_G', 'FLUX_R', 'FLUX_Z'])
+            # These are the columns from the DESI data that we want to import
+            desired_columns = [
+            'VRAD', 'VRAD_ERR', 'RVS_WARN', 'TEFF', 'LOGG', ## TEFF and LOGG needed for FeH correction
+            'RR_SPECTYPE', 
+            'TARGET_RA', 'TARGET_DEC', 'FEH', 'FEH_ERR',
+            'TARGETID', 'PRIMARY',
+            'SOURCE_ID', 'PMRA', 'PMRA_ERROR', 'PMDEC', 'PMDEC_ERROR', 'PARALLAX', 'PARALLAX_ERROR', 'PMRA_PMDEC_CORR'
+            ]
+            desi_hdu_indices = [1,3,4]
+            self.desi_vrad_data = stream_funcs.load_fits_columns(desi_path, desired_columns, desi_hdu_indices)
+            self.desi_vrad_data.label='DESI'
+            self.desi_data = table.hstack([self.desi_vrad_data, self.decals_data]) 
+            # Drop the rows with NaN values in all columns
+            print(f"Length of DESI Data before Cuts: {len(self.desi_data)}")
+            self.desi_data = stream_funcs.dropna_Table(self.desi_data, columns = desired_columns)
+            self.desi_data = self.desi_data[(self.desi_data['RVS_WARN'] == 0) & (self.desi_data['RR_SPECTYPE'] == 'STAR') & (self.desi_data['PRIMARY']) &\
+            (self.desi_data['VRAD_ERR'] < 10) & (self.desi_data['FEH_ERR'] < 0.5)] 
+            self.desi_data.remove_columns(['RVS_WARN', 'RR_SPECTYPE'])
+            self.desi_data = self.desi_data.to_pandas()
+            # remove stars with FLUX_G and FLUX_R as NaN
+            self.desi_data = self.desi_data[~self.desi_data['FLUX_G'].isna() | ~self.desi_data['FLUX_R'].isna() |  ~self.desi_data['EBV'].isna()]
+            
+            print(f"Length after NaN cut: {len(self.desi_data)}")
         
-        print(f"Length after NaN cut: {len(self.desi_data)}")
 
-        # Applying additional errors in quadrature
-        self.desi_data['VRAD_ERR'] = np.sqrt(self.desi_data['VRAD_ERR']**2 + 0.9**2) ### Turn into its own column
-        self.desi_data['PMRA_ERROR'] = np.sqrt(self.desi_data['PMRA_ERROR']**2 + (np.sqrt(550)*0.001)**2) ### Turn into its own column
-        self.desi_data['PMDEC_ERROR'] = np.sqrt(self.desi_data['PMDEC_ERROR']**2 + (np.sqrt(550)*0.001)**2) ### Turn into its own column
-        self.desi_data['FEH_ERR'] = np.sqrt(self.desi_data['FEH_ERR']**2 + 0.01**2) ### Turn into its own column
+            # Applying additional errors in quadrature
+            self.desi_data['VRAD_ERR'] = np.sqrt(self.desi_data['VRAD_ERR']**2 + 0.9**2) ### Turn into its own column
+            self.desi_data['PMRA_ERROR'] = np.sqrt(self.desi_data['PMRA_ERROR']**2 + (np.sqrt(550)*0.001)**2) ### Turn into its own column
+            self.desi_data['PMDEC_ERROR'] = np.sqrt(self.desi_data['PMDEC_ERROR']**2 + (np.sqrt(550)*0.001)**2) ### Turn into its own column
+            self.desi_data['FEH_ERR'] = np.sqrt(self.desi_data['FEH_ERR']**2 + 0.01**2) ### Turn into its own column
 
 
-        # # Apply Metallicity correction to the DR1 Data (See Section 4.2 https://arxiv.org/pdf/2505.14787)
-        # print("Adding empirical FEH calibration (can find uncalibrated data in column['FEH_uncalib])")
-        # self.desi_data['FEH_uncalib'] = self.desi_data['FEH']
-        # self.desi_data['FEH'] = feh_correct.calibrate(self.desi_data['FEH'], self.desi_data['TEFF'], self.desi_data['LOGG'])
-        
-        # Switch to VGSR instead of VRAD
-        self.desi_data['VGSR'] = np.array(
-            stream_funcs.vhel_to_vgsr(
-                np.array(self.desi_data['TARGET_RA']) * u.deg,
-                np.array(self.desi_data['TARGET_DEC']) * u.deg,
-                np.array(self.desi_data['VRAD']) * (u.km / u.s),
-            ).value
-        )
+            # # Apply Metallicity correction to the DR1 Data (See Section 4.2 https://arxiv.org/pdf/2505.14787)
+            # print("Adding empirical FEH calibration (can find uncalibrated data in column['FEH_uncalib])")
+            # self.desi_data['FEH_uncalib'] = self.desi_data['FEH']
+            # self.desi_data['FEH'] = feh_correct.calibrate(self.desi_data['FEH'], self.desi_data['TEFF'], self.desi_data['LOGG'])
+            
+            # Switch to VGSR instead of VRAD
+            self.desi_data['VGSR'] = np.array(
+                stream_funcs.vhel_to_vgsr(
+                    np.array(self.desi_data['TARGET_RA']) * u.deg,
+                    np.array(self.desi_data['TARGET_DEC']) * u.deg,
+                    np.array(self.desi_data['VRAD']) * (u.km / u.s),
+                ).value
+            )
+        else:
+            desi_data_tbl = table.Table.read(self.desi_path, format='fits')
+            self.desi_data = pd.DataFrame(desi_data_tbl.as_array())
+
 
         # Lets load the STREAMFINDER data for Gaia DR3
         if sf_path:
@@ -1162,6 +1170,9 @@ class StreamPlotter:
         # Residuals mode prep (only applicable with MCMC splines in stream frame)
         residual_mode = False
         preds = {'desi': {}, 'sf': {}, 'sf_cut': {}, 'sf_only': {}}
+        # Prepare holders so we can later use MCMC spline ranges for y-limit logic ("faded blue regions")
+        vgsr_mcmc = pmra_mcmc = pmdec_mcmc = feh_mcmc = None
+        sigma_vgsr = sigma_pmra = sigma_pmdec = sigma_feh = None
         if mcmc_object is not None:
                 meds = mcmc_object.meds
                 ep = mcmc_object.ep
@@ -1643,63 +1654,79 @@ class StreamPlotter:
                     else:
                         ax[4].set_ylim(-1, 1)
 
-        # Set y-axis limits based on stream data if available (fallback for non-residuals)
+        # Set y-axis limits (non-residual mode) based on member stars OR faded blue MCMC regions (whichever extends further)
         if not residual_mode:
-            # Use membership probabilities to set y-limits if available
+            pad_settings = self.plot_params.get('limits', {})
+            pad_v = pad_settings.get('nonresidual_pad_vgsr', 50)
+            pad_pm = pad_settings.get('nonresidual_pad_pm', 5)
+            pad_feh = pad_settings.get('nonresidual_pad_feh', 0.5)
+            feh_default = pad_settings.get('feh_ylim_default', (-4, -0.5))
+
+            member_idx = None
             if show_membership_prob and stream_prob is not None:
                 high_prob_mask = stream_prob >= min_prob
-                high_prob_indices = np.where(high_prob_mask)[0]
-                if len(high_prob_indices) > 0:
-                    # Get padding values from plot params
-                    pad_v = self.plot_params.get('limits', {}).get('nonresidual_pad_vgsr', 50)
-                    pad_pm = self.plot_params.get('limits', {}).get('nonresidual_pad_pm', 5)
-                    pad_feh = self.plot_params.get('limits', {}).get('nonresidual_pad_feh', 0.5)
-                    
-                    # Get data from high-probability member stars
-                    member_vgsr = self.data.desi_data['VGSR'].iloc[high_prob_indices]
-                    member_pmra = self.data.desi_data['PMRA'].iloc[high_prob_indices]
-                    member_pmdec = self.data.desi_data['PMDEC'].iloc[high_prob_indices]
-                    
-                    # Set limits based on member star ranges with padding
-                    ax[1].set_ylim(np.nanmin(member_vgsr) - pad_v, np.nanmax(member_vgsr) + pad_v)
-                    ax[2].set_ylim(np.nanmin(member_pmra) - pad_pm, np.nanmax(member_pmra) + pad_pm)
-                    ax[3].set_ylim(np.nanmin(member_pmdec) - pad_pm, np.nanmax(member_pmdec) + pad_pm)
-                    
-                    # Handle metallicity if available
-                    if 'FEH' in self.data.desi_data.columns:
-                        member_feh = self.data.desi_data['FEH'].iloc[high_prob_indices]
-                        if len(member_feh.dropna()) > 0:
-                            ax[4].set_ylim(np.nanmin(member_feh) - pad_feh, np.nanmax(member_feh) + pad_feh)
-                        else:
-                            feh_ylim = self.plot_params.get('limits', {}).get('feh_ylim_default', (-4, -0.5))
-                            ax[4].set_ylim(*feh_ylim)
-                    else:
-                        feh_ylim = self.plot_params.get('limits', {}).get('feh_ylim_default', (-4, -0.5))
-                        ax[4].set_ylim(*feh_ylim)
-            
-            # Fallback to StreamFinder data if no membership probabilities but showStream is True
-            elif showStream and hasattr(self.data, 'confirmed_sf_and_desi') and len(self.data.confirmed_sf_and_desi) > 0:
-                # VGSR limits
-                vgsr_data = [self.data.confirmed_sf_and_desi['VGSR']]
-                if hasattr(self.data, 'cut_confirmed_sf_and_desi') and len(self.data.cut_confirmed_sf_and_desi) > 0 and show_cut:
-                    vgsr_data.append(self.data.cut_confirmed_sf_and_desi['VGSR'])
-                vgsr_combined = np.concatenate([np.array(x) for x in vgsr_data])
-                ax[1].set_ylim(np.nanmin(vgsr_combined) - 50, np.nanmax(vgsr_combined) + 50)
-                
-                # Proper motion limits  
-                pmra_data = [self.data.confirmed_sf_and_desi['PMRA']]
-                pmdec_data = [self.data.confirmed_sf_and_desi['PMDEC']]
-                if hasattr(self.data, 'cut_confirmed_sf_and_desi') and len(self.data.cut_confirmed_sf_and_desi) > 0 and show_cut:
-                    pmra_data.append(self.data.cut_confirmed_sf_and_desi['PMRA'])
-                    pmdec_data.append(self.data.cut_confirmed_sf_and_desi['PMDEC'])
-                pmra_combined = np.concatenate([np.array(x) for x in pmra_data])
-                pmdec_combined = np.concatenate([np.array(x) for x in pmdec_data])
-                ax[2].set_ylim(np.nanmin(pmra_combined) - 5, np.nanmax(pmra_combined) + 5)
-                ax[3].set_ylim(np.nanmin(pmdec_combined) - 5, np.nanmax(pmdec_combined) + 5)
+                member_idx = np.where(high_prob_mask)[0]
+            elif showStream and hasattr(self.data, 'confirmed_sf_and_desi'):
+                member_idx = self.data.confirmed_sf_and_desi.index
 
-                # Set metallicity limits (non-residuals default)
-                feh_ylim = self.plot_params.get('limits', {}).get('feh_ylim_default', (-4, -0.5))
-                ax[4].set_ylim(*feh_ylim)
+            # Helper to compute combined min/max including MCMC fill regions
+            def combine_range(member_values, mcmc_curve, sigma):
+                vals = []
+                if member_values is not None and len(member_values) > 0:
+                    vals.append(member_values.values if hasattr(member_values, 'values') else np.array(member_values))
+                if (mcmc_curve is not None) and (sigma is not None):
+                    # Include +/-2 sigma envelope (faded blue outer region)
+                    vals.append(mcmc_curve - 2 * sigma)
+                    vals.append(mcmc_curve + 2 * sigma)
+                if len(vals) == 0:
+                    return None
+                allv = np.concatenate([np.array(v, dtype=float).ravel() for v in vals])
+                # Remove NaNs
+                allv = allv[~np.isnan(allv)]
+                if len(allv) == 0:
+                    return None
+                return float(np.nanmin(allv)), float(np.nanmax(allv))
+
+            # Build member value series
+            member_vgsr = member_pmra = member_pmdec = member_feh = None
+            if member_idx is not None and len(member_idx) > 0:
+                if show_membership_prob and stream_prob is not None:
+                    # member_idx are DESI row indices
+                    member_vgsr = self.data.desi_data['VGSR'].iloc[member_idx]
+                    member_pmra = self.data.desi_data['PMRA'].iloc[member_idx]
+                    member_pmdec = self.data.desi_data['PMDEC'].iloc[member_idx]
+                    if 'FEH' in self.data.desi_data.columns:
+                        member_feh = self.data.desi_data['FEH'].iloc[member_idx]
+                else:
+                    # StreamFinder confirmed members
+                    member_vgsr = self.data.confirmed_sf_and_desi['VGSR']
+                    member_pmra = self.data.confirmed_sf_and_desi['PMRA']
+                    member_pmdec = self.data.confirmed_sf_and_desi['PMDEC']
+                    if 'FEH' in self.data.desi_data.columns:
+                        member_feh = self.data.desi_data['FEH'] if 'FEH' in self.data.desi_data else None
+                    # Optionally include cut stars to extend range
+                    if hasattr(self.data, 'cut_confirmed_sf_and_desi') and show_cut and len(self.data.cut_confirmed_sf_and_desi) > 0:
+                        member_vgsr = pd.concat([member_vgsr, self.data.cut_confirmed_sf_and_desi['VGSR']])
+                        member_pmra = pd.concat([member_pmra, self.data.cut_confirmed_sf_and_desi['PMRA']])
+                        member_pmdec = pd.concat([member_pmdec, self.data.cut_confirmed_sf_and_desi['PMDEC']])
+
+            # Determine combined ranges
+            vgsr_range = combine_range(member_vgsr, vgsr_mcmc, sigma_vgsr)
+            pmra_range = combine_range(member_pmra, pmra_mcmc, sigma_pmra)
+            pmdec_range = combine_range(member_pmdec, pmdec_mcmc, sigma_pmdec)
+            feh_range = combine_range(member_feh, feh_mcmc, sigma_feh) if member_feh is not None else None
+
+            # Apply ranges with padding; fall back gracefully if None
+            if vgsr_range is not None:
+                ax[1].set_ylim(vgsr_range[0] - pad_v, vgsr_range[1] + pad_v)
+            if pmra_range is not None:
+                ax[2].set_ylim(pmra_range[0] - pad_pm, pmra_range[1] + pad_pm)
+            if pmdec_range is not None:
+                ax[3].set_ylim(pmdec_range[0] - pad_pm, pmdec_range[1] + pad_pm)
+            if feh_range is not None:
+                ax[4].set_ylim(feh_range[0] - pad_feh, feh_range[1] + pad_feh)
+            else:
+                ax[4].set_ylim(*feh_default)
         
         # Plot splines if requested and available
         if (show_initial_splines or show_optimized_splines or show_mcmc_splines) and stream_frame and self.mcmeta is not None:
@@ -2228,8 +2255,12 @@ class StreamPlotter:
             ax.hist(sf_data['VGSR'], density=True, color='lightblue', bins=bins, alpha=0.8, label='SF Stars')
             
         # Plot truncated Gaussian components
-        vgsr_range = np.linspace(self.mcmeta.truncation_params['vgsr_min'] - 50, 
-                                self.mcmeta.truncation_params['vgsr_max'] + 50, 200)
+        if self.mcmeta.truncation_params['vgsr_min'] != -np.inf or self.mcmeta.truncation_params['vgsr_max'] != np.inf:
+            vgsr_range = np.linspace(self.mcmeta.truncation_params['vgsr_min'] - 50, 
+                                    self.mcmeta.truncation_params['vgsr_max'] + 50, 200)
+        else:
+            vgsr_range = np.linspace(np.min(desi_data['VGSR']) - 50, 
+                                    np.max(desi_data['VGSR']) + 50, 200)
         
         # Stream component (using mean of spline points as approximation)
         stream_vgsr_mean = np.mean(self.mcmeta.initial_params['vgsr_spline_points'])
@@ -2256,7 +2287,8 @@ class StreamPlotter:
             ax.plot(vgsr_range, stream_weight * stream_vgsr_pdf + bg_weight * bg_vgsr_pdf, 'k-', label='Total Model', lw=3,zorder=1)
             
         ax.set_xlabel(r'V$_{GSR}$ (km/s)', fontsize=12)
-        ax.set_xlim(self.mcmeta.truncation_params['vgsr_min'] - 50, self.mcmeta.truncation_params['vgsr_max'] + 50)
+        if self.mcmeta.truncation_params['vgsr_min'] != -np.inf and self.mcmeta.truncation_params['vgsr_max'] != np.inf:
+            ax.set_xlim(self.mcmeta.truncation_params['vgsr_min'] - 50, self.mcmeta.truncation_params['vgsr_max'] + 50)
         ax.legend(fontsize='large')
         ax.tick_params(axis='both', labelsize=14)
         stream_funcs.plot_form(ax)
@@ -2270,9 +2302,13 @@ class StreamPlotter:
             ax.hist(sf_data['FEH'], density=True, color='lightblue', bins=bins, alpha=0.8)
             
         # Plot truncated Gaussian components
-        feh_range = np.linspace(self.mcmeta.truncation_params['feh_min'] - 0.5, 
-                               self.mcmeta.truncation_params['feh_max'] + 0.5, 200)
-        
+        if self.mcmeta.truncation_params['feh_min'] != -np.inf or self.mcmeta.truncation_params['feh_max'] != np.inf:
+            feh_range = np.linspace(self.mcmeta.truncation_params['feh_min'] - 0.5, 
+                                self.mcmeta.truncation_params['feh_max'] + 0.5, 200)
+        else:
+            feh_range = np.linspace(np.min(desi_data['FEH']) - 0.5, 
+                                np.max(desi_data['FEH']) + 0.5, 200)
+
         # Stream component
         stream_feh_mean = self.mcmeta.initial_params['feh1']
         stream_feh_std = 10**self.mcmeta.initial_params['lsigfeh']
@@ -2297,7 +2333,8 @@ class StreamPlotter:
             ax.plot(feh_range, stream_weight * stream_feh_pdf + bg_weight * bg_feh_pdf, 'k-', lw=3, zorder=1)
             
         ax.set_xlabel('[Fe/H]', fontsize=12)
-        ax.set_xlim(self.mcmeta.truncation_params['feh_min'] - 0.5, self.mcmeta.truncation_params['feh_max'] + 0.5)
+        if self.mcmeta.truncation_params['feh_min'] != -np.inf and self.mcmeta.truncation_params['feh_max'] != np.inf:
+            ax.set_xlim(self.mcmeta.truncation_params['feh_min'] - 0.5, self.mcmeta.truncation_params['feh_max'] + 0.5)
         ax.tick_params(axis='both', labelsize=14)
         stream_funcs.plot_form(ax)
         
@@ -2310,9 +2347,13 @@ class StreamPlotter:
             ax.hist(sf_data['PMRA'], density=True, color='lightblue', bins=bins, alpha=0.8)
             
         # Plot truncated Gaussian components
-        pmra_range = np.linspace(self.mcmeta.truncation_params['pmra_min'] - 15, 
+        if self.mcmeta.truncation_params['pmra_min'] != -np.inf or self.mcmeta.truncation_params['pmra_max'] != np.inf:
+            pmra_range = np.linspace(self.mcmeta.truncation_params['pmra_min'] - 15, 
                                 self.mcmeta.truncation_params['pmra_max'] + 15, 200)
-        
+        else:
+            pmra_range = np.linspace(np.min(desi_data['PMRA']) - 15, 
+                                np.max(desi_data['PMRA']) + 15, 200)
+
         # Stream component (using mean of spline points as approximation)
         stream_pmra_mean = np.mean(self.mcmeta.initial_params['pmra_spline_points'])
         stream_pmra_std = 10**self.mcmeta.initial_params['lsigpmra']
@@ -2338,7 +2379,8 @@ class StreamPlotter:
             
  
         ax.set_xlabel(r'$\mu_{RA}$ (mas/yr)', fontsize=12)
-        ax.set_xlim(self.mcmeta.truncation_params['pmra_min'] - 15, self.mcmeta.truncation_params['pmra_max'] + 15)
+        if self.mcmeta.truncation_params['pmra_min'] != -np.inf and self.mcmeta.truncation_params['pmra_max'] != np.inf:
+            ax.set_xlim(self.mcmeta.truncation_params['pmra_min'] - 15, self.mcmeta.truncation_params['pmra_max'] + 15)
         ax.tick_params(axis='both', labelsize=14)
         stream_funcs.plot_form(ax)
         
@@ -2351,9 +2393,13 @@ class StreamPlotter:
             ax.hist(sf_data['PMDEC'], density=True, color='lightblue', bins=bins, alpha=0.8)
             
         # Plot truncated Gaussian components
-        pmdec_range = np.linspace(self.mcmeta.truncation_params['pmdec_min'] - 15, 
+        if self.mcmeta.truncation_params['pmdec_min'] != -np.inf or self.mcmeta.truncation_params['pmdec_max'] != np.inf:
+            pmdec_range = np.linspace(self.mcmeta.truncation_params['pmdec_min'] - 15, 
                                  self.mcmeta.truncation_params['pmdec_max'] + 15, 200)
-        
+        else:
+            pmdec_range = np.linspace(np.min(desi_data['PMDEC']) - 15, 
+                                 np.max(desi_data['PMDEC']) + 15, 200)
+
         # Stream component (using mean of spline points as approximation)
         stream_pmdec_mean = np.mean(self.mcmeta.initial_params['pmdec_spline_points'])
         stream_pmdec_std = 10**self.mcmeta.initial_params['lsigpmdec']
@@ -2378,7 +2424,8 @@ class StreamPlotter:
             ax.plot(pmdec_range, stream_weight * stream_pmdec_pdf + bg_weight * bg_pmdec_pdf, 'k-', lw=3, zorder=1)
         
         ax.set_xlabel(r'$\mu_{DEC}$ (mas/yr)', fontsize=12)
-        ax.set_xlim(self.mcmeta.truncation_params['pmdec_min'] - 15, self.mcmeta.truncation_params['pmdec_max'] + 15)
+        if self.mcmeta.truncation_params['pmdec_min'] != -np.inf and self.mcmeta.truncation_params['pmdec_max'] != np.inf:
+            ax.set_xlim(self.mcmeta.truncation_params['pmdec_min'] - 15, self.mcmeta.truncation_params['pmdec_max'] + 15)
         ax.tick_params(axis='both', labelsize=14)
         stream_funcs.plot_form(ax)
         
@@ -2418,14 +2465,14 @@ class MCMeta:
             # Default truncation values based on data range
             data = self.stream.data.desi_data
             self.truncation_params = {
-                'vgsr_min': data['VGSR'].min(),
-                'vgsr_max': data['VGSR'].max(),
-                'feh_min': data['FEH'].min(),
-                'feh_max': data['FEH'].max(),
-                'pmra_min': data['PMRA'].min(),
-                'pmra_max': data['PMRA'].max(),
-                'pmdec_min': data['PMDEC'].min(),
-                'pmdec_max': data['PMDEC'].max()
+                'vgsr_min': -np.inf,
+                'vgsr_max': np.inf,
+                'feh_min': -np.inf,
+                'feh_max': np.inf,
+                'pmra_min': -np.inf,
+                'pmra_max': np.inf,
+                'pmdec_min': -np.inf,
+                'pmdec_max': np.inf
             }
         else:
             self.truncation_params = truncation_params
@@ -2445,51 +2492,49 @@ class MCMeta:
         print('Making stream initial guess based on galstream and STREAMFINDER...')
         self.initial_params['pstream'] = np.abs(len(self.sf_data)/len(self.stream.data.desi_data))
 
-        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['VGSR'].values, 2)
+        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['VGSR'].values, 1)
         self.vgsr_fit = np.poly1d(p)
-        # Calculate residuals around the fitted track
-        vgsr_residuals = self.sf_data['VGSR'].values - self.vgsr_fit(self.sf_data['phi1'].values)
-        self.initial_params['lsigvgsr'] = np.log10(vgsr_residuals.std())
+        self.initial_params['lsigvgsr'] = np.log10(((self.sf_data['VGSR'].values.std())**2 - (np.mean(self.sf_data['VRAD_ERR'].values))**2)**0.5)
         self.initial_params['vgsr_spline_points'] = self.vgsr_fit(self.phi1_spline_points)
         print(f"Stream VGSR dispersion from trimmed SF: {10**self.initial_params['lsigvgsr']:.2f} km/s")
 
         self.initial_params['feh1'] = self.sf_data['FEH'].values.mean()
-        # For metallicity, use std around the mean since it's expected to be roughly constant
-        feh_residuals = self.sf_data['FEH'].values - self.initial_params['feh1']
-        self.initial_params['lsigfeh'] = np.log10(feh_residuals.std())
+        self.initial_params['lsigfeh'] = np.log10(((self.sf_data['FEH'].values.std())**2 - (np.mean(self.sf_data['FEH_ERR'].values))**2)**0.5)
         print(f'Stream mean metallicity from trimmed SF: {self.initial_params["feh1"]:.2f} +- {10**self.initial_params["lsigfeh"]:.3f} dex')
 
-        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMRA'].values, 2)
+        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMRA'].values, 1)
         self.pmra_fit = np.poly1d(p)
-        # Calculate residuals around the fitted track
-        pmra_residuals = self.sf_data['PMRA'].values - self.pmra_fit(self.sf_data['phi1'].values)
-        self.initial_params['lsigpmra'] = np.log10(pmra_residuals.std())
+        self.initial_params['lsigpmra'] = np.log10(((self.sf_data['PMRA'].values.std())**2 - (np.mean(self.sf_data['PMRA_ERROR'].values))**2)**0.5)
         self.initial_params['pmra_spline_points'] = self.pmra_fit(self.phi1_spline_points)
         print(f"Stream PMRA dispersion from trimmed SF: {10**self.initial_params['lsigpmra']:.2f} mas/yr")
 
-        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMDEC'].values, 2)
+        p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMDEC'].values, 1)
         self.pmdec_fit = np.poly1d(p)
-        # Calculate residuals around the fitted track
-        pmdec_residuals = self.sf_data['PMDEC'].values - self.pmdec_fit(self.sf_data['phi1'].values)
-        self.initial_params['lsigpmdec'] = np.log10(pmdec_residuals.std())
+        self.initial_params['lsigpmdec'] = np.log10(((self.sf_data['PMDEC'].values.std())**2 - (np.mean(self.sf_data['PMDEC_ERROR'].values))**2)**0.5)
         self.initial_params['pmdec_spline_points'] = self.pmdec_fit(self.phi1_spline_points)
         print(f"Stream PMDEC dispersion from trimmed SF: {10**self.initial_params['lsigpmdec']:.2f} mas/yr")
 
         print('Making background initial guess...')
-        self.initial_params['bv'] = np.mean(np.array(self.stream.data.desi_data['VGSR']))
-        self.initial_params['lsigbv'] = np.log10(np.std(np.array(self.stream.data.desi_data['VGSR'])))
+        counts, edges = np.histogram(np.array(self.stream.data.desi_data['VGSR']), bins=50)
+        self.initial_params['bv'] = 0.5 * (edges[np.argmax(counts)] + edges[np.argmax(counts) + 1])
+
+        self.initial_params['lsigbv'] = np.log10(((np.std(np.array(self.stream.data.desi_data['VGSR'])))**2 - (np.mean(np.array(self.stream.data.desi_data['VRAD_ERR'])))**2)**0.5)
         print(f"Background velocity: {self.initial_params['bv']:.2f} +- {10**self.initial_params['lsigbv']:.2f} km/s")
 
-        self.initial_params['bfeh'] = np.mean(np.array(self.stream.data.desi_data['FEH']))
-        self.initial_params['lsigbfeh'] = np.log10(np.std(np.array(self.stream.data.desi_data['FEH'])))
+
+        counts, edges = np.histogram(np.array(self.stream.data.desi_data['FEH']), bins=50)
+        self.initial_params['bfeh'] = 0.5 * (edges[np.argmax(counts)] + edges[np.argmax(counts) + 1])
+        self.initial_params['lsigbfeh'] = np.log10(((np.std(np.array(self.stream.data.desi_data['FEH'])))**2 - (np.mean(np.array(self.stream.data.desi_data['FEH_ERR'])))**2)**0.5)
         print(f"Background metallicity: {self.initial_params['bfeh']:.2f} +- {10**self.initial_params['lsigbfeh']:.3f} dex")
 
-        self.initial_params['bpmra'] = np.mean(np.array(self.stream.data.desi_data['PMRA']))
-        self.initial_params['lsigbpmra'] = np.log10(np.std(np.array(self.stream.data.desi_data['PMRA'])))
+        counts, edges = np.histogram(np.array(self.stream.data.desi_data['PMRA']), bins=50)
+        self.initial_params['bpmra'] = 0.5 * (edges[np.argmax(counts)] + edges[np.argmax(counts) + 1])
+        self.initial_params['lsigbpmra'] = np.log10(((np.std(np.array(self.stream.data.desi_data['PMRA'])))**2 - (np.mean(np.array(self.stream.data.desi_data['PMRA_ERROR'])))**2)**0.5)
         print(f"Background PMRA: {self.initial_params['bpmra']:.2f} +- {10**self.initial_params['lsigbpmra']:.2f} mas/yr")
 
-        self.initial_params['bpmdec'] = np.mean(np.array(self.stream.data.desi_data['PMDEC']))
-        self.initial_params['lsigbpmdec'] = np.log10(np.std(np.array(self.stream.data.desi_data['PMDEC'])))
+        counts, edges = np.histogram(np.array(self.stream.data.desi_data['PMDEC']), bins=50)
+        self.initial_params['bpmdec'] = 0.5 * (edges[np.argmax(counts)] + edges[np.argmax(counts) + 1])
+        self.initial_params['lsigbpmdec'] = np.log10(((np.std(np.array(self.stream.data.desi_data['PMDEC'])))**2 - (np.mean(np.array(self.stream.data.desi_data['PMDEC_ERROR'])))**2)**0.5)
         print(f"Background PMDEC: {self.initial_params['bpmdec']:.2f} +- {10**self.initial_params['lsigbpmdec']:.2f} mas/yr")
     
     def priors(self, prior_arr):
@@ -2540,7 +2585,7 @@ class MCMeta:
         )
         # Run optimization
         print("Running optimization...")
-        self.sp_result = sp.optimize.minimize(optfunc, self.flat_p0_guess, method="Nelder-Mead")
+        self.sp_result = sp.optimize.minimize(optfunc, self.flat_p0_guess, method="COBYLA", options={'maxiter': 20000, 'maxfev': 20000})
         print(self.sp_result.message)
 
         self.reshaped_result = stream_funcs.reshape_arr(self.sp_result.x, self.array_lengths)
@@ -2618,12 +2663,27 @@ class MCMC:
         self.backend = emcee.backends.HDFBackend(self.output_dir+'/'+self.stream.streamName+str(self.meta.no_of_spline_points)+'.h5')
         self.backend.reset(self.meta.nwalkers,len(self.meta.p0))
     #WIP
-    def run(self, nproc=32, nburnin=5000, nstep=5000, use_optimized_start=True):
+    def run(self, nproc=32, nsteps=10000, use_optimized_start=True, **kwargs):
+        """
+        Run a single continuous MCMC chain for `nsteps` iterations. Burn-in can
+        be applied later using `apply_burnin(discard, thin)`.
+
+        Backward compatibility: if called with legacy keywords `nburnin` and
+        `nstep`, we will ignore the two-phase pattern and instead run for
+        `nsteps = nburnin + nstep`.
+        """
         from multiprocessing import Pool
         self.nproc = nproc
-        self.nburnin = nburnin
-        self.nstep = nstep
         self.use_optimized_start = use_optimized_start
+
+        # Back-compat: allow old signature nburnin+nstep
+        if 'nburnin' in kwargs or 'nstep' in kwargs:
+            nburnin_legacy = int(kwargs.get('nburnin', 0) or 0)
+            nstep_legacy = int(kwargs.get('nstep', 0) or 0)
+            nsteps = nburnin_legacy + nstep_legacy if (nburnin_legacy + nstep_legacy) > 0 else nsteps
+            print(f"[MCMC] Back-compat: using nsteps = nburnin({nburnin_legacy}) + nstep({nstep_legacy}) = {nsteps}")
+
+        self.nsteps = int(nsteps)
         if self.use_optimized_start:
             print("Using optimized parameters as starting positions...")
             start_params = self.meta.sp_result.x
@@ -2634,7 +2694,6 @@ class MCMC:
             start_label = "initial_guess"
 
         with Pool(self.nproc) as pool:
-            print(f"Running burn-in with {self.nburnin} iterations. starting from {start_label} parameters...")
             p0 = start_params
             ep0 = np.zeros(len(p0)) + 0.01
             assert np.all(np.isfinite(start_params)), "start_params contains NaN or inf"
@@ -2652,6 +2711,7 @@ class MCMC:
             p0s[:,0] = np.clip(p0s[:,0], 1e-10, 1 - 1e-10)
                 
             start = time.time()
+            print(f"Running a single continuous chain for {self.nsteps} iterations starting from {start_label} parameters...")
             es = emcee.EnsembleSampler(
                 self.meta.nwalkers, len(self.meta.flat_p0_guess), stream_funcs.spline_lnprob_1D,
                 args=(self.meta.prior_arr, self.meta.phi1_spline_points, 
@@ -2663,50 +2723,149 @@ class MCMC:
                     True, False, True, self.meta.spline_k, self.meta.array_lengths,
                     self.meta.vgsr_trunc, self.meta.feh_trunc, self.meta.pmra_trunc, self.meta.pmdec_trunc),
                 pool=pool, backend=self.backend)
-            PP = es.run_mcmc(p0s, nburnin)
+            _ = es.run_mcmc(p0s, self.nsteps)
             print(f'Took {(time.time()-start):.1f} seconds ({(time.time()-start)/60:.1f} minutes)')
-            
-            print(f'Now sampling with {nstep} iterations')
-            es.reset()
-            start = time.time()
-            es.run_mcmc(PP.coords, nstep)
-            print(f'Took {(time.time()-start):.1f} seconds ({(time.time()-start)/60:.1f} minutes)')
-            
-            self.chain = es.chain
-            print('Getting flatchain...')
-            self.flatchain = es.flatchain
+
+            # Store chains in the shape expected by show_chains(): (nwalkers, nsteps, ndim)
+            try:
+                chain_arr = es.get_chain()  # (nsteps, nwalkers, ndim)
+                self.chain = np.swapaxes(chain_arr, 0, 1)
+            except Exception:
+                # Fallback to legacy attributes if available
+                self.chain = getattr(es, 'chain', None)
+
+            print('Computing flatchain (no burn-in discarded; use apply_burnin to change)...')
+            try:
+                self.flatchain = es.get_chain(flat=True)
+            except Exception:
+                self.flatchain = getattr(es, 'flatchain', None)
+
+            # Track current discard/thin used to compute flatchain
+            self.current_discard = 0
+            self.current_thin = 1
+
+    def apply_burnin(self, discard=0, thin=1):
+        """
+        Apply burn-in and thinning post-hoc to set `self.flatchain` from the
+        stored backend; updates `current_discard` and `current_thin`.
+        """
+        try:
+            # Access the sampler via the backend
+            if hasattr(self, 'backend'):
+                # emcee provides a convenience method on the backend
+                chain_arr = self.backend.get_chain(discard=discard, thin=thin, flat=True)
+            else:
+                raise AttributeError('No backend found on MCMC object')
+        except Exception:
+            # Fallback: if we have the full non-flat chain in self.chain
+            chain_local = getattr(self, 'chain', None)
+            if chain_local is None:
+                raise RuntimeError('No chain available to apply burn-in to.')
+            # self.chain is (nwalkers, nsteps, ndim); apply discard/thin
+            chain_swapped = np.swapaxes(chain_local, 0, 1)  # (nsteps, nwalkers, ndim)
+            chain_cut = chain_swapped[discard::thin]
+            chain_arr = chain_cut.reshape(-1, chain_cut.shape[-1])
+
+        self.flatchain = chain_arr
+        self.current_discard = int(discard)
+        self.current_thin = int(thin)
+        print(f"Applied burn-in: discard={self.current_discard}, thin={self.current_thin}. Flatchain shape: {self.flatchain.shape}")
     
-    def show_chains(self):
+    def show_chains(self, trimmed=False):
         indices = np.arange(1, self.meta.no_of_spline_points + 1).astype(str)
         velocity_labels = ['vgsr' + i for i in indices]
-        pmra_labels = ['pmra' + i for i in indices] 
+        pmra_labels = ['pmra' + i for i in indices]
         pmdec_labels = ['pmdec' + i for i in indices]
 
-        self.expanded_param_labels = (['pstream'] + 
-                                velocity_labels + 
-                                ['lsigvgsr', 'feh1', 'lsigfeh'] +
-                                pmra_labels + 
-                                ['lsigpmra'] +
-                                pmdec_labels +
-                                ['lsigpmdec', 'bv', 'lsigbv', 'bfeh', 'lsigbfeh', 'bpmra', 'lsigbpmra', 'bpmdec', 'lsigbpmdec'])
+        self.expanded_param_labels = (
+            ['pstream'] +
+            velocity_labels +
+            ['lsigvgsr', 'feh1', 'lsigfeh'] +
+            pmra_labels +
+            ['lsigpmra'] +
+            pmdec_labels +
+            ['lsigpmdec', 'bv', 'lsigbv', 'bfeh', 'lsigbfeh', 'bpmra', 'lsigbpmra', 'bpmdec', 'lsigbpmdec']
+        )
 
-        Nrow = self.chain.shape[2]
-        fig, axes = plt.subplots(Nrow, figsize=(6,2*Nrow))
+        # Fetch raw or trimmed chain from backend/in-memory
+        if trimmed:
+            discard = int(getattr(self, 'current_discard', 0))
+            thin = int(getattr(self, 'current_thin', 1))
+            chain = None
+            try:
+                # (nsteps_trim, nwalkers, ndim)
+                chain_backend = self.backend.get_chain(discard=discard, thin=thin, flat=False)
+                chain = np.swapaxes(chain_backend, 0, 1)  # -> (nwalkers, nsteps_trim, ndim)
+            except Exception:
+                pass
+            if chain is None:
+                chain_local = getattr(self, 'chain', None)
+                if chain_local is None:
+                    raise RuntimeError('No MCMC chain available. Run mcmc.run() first.')
+                chain_swapped = np.swapaxes(chain_local, 0, 1)  # (nsteps, nwalkers, ndim)
+                chain_cut = chain_swapped[discard::thin]
+                chain = np.swapaxes(chain_cut, 0, 1)  # back to (nwalkers, nsteps_trim, ndim)
+        else:
+            chain = None
+            try:
+                # (nsteps, nwalkers, ndim)
+                chain_backend = self.backend.get_chain(flat=False)
+                chain = np.swapaxes(chain_backend, 0, 1)  # -> (nwalkers, nsteps, ndim)
+            except Exception:
+                pass
+            if chain is None:
+                chain = getattr(self, 'chain', None)
+            if chain is None:
+                raise RuntimeError('No MCMC chain available. Run mcmc.run() first.')
 
+        chain = np.asarray(chain)
+        Nrow = chain.shape[2]
+        fig, axes = plt.subplots(Nrow, figsize=(6, 2 * Nrow))
+        if Nrow == 1:
+            axes = [axes]
 
-        for iparam,ax in enumerate(axes):
+        for iparam, ax in enumerate(axes):
             for j in range(self.meta.nwalkers):
-                ax.plot(self.chain[j,:,iparam], lw=.5, alpha=.2)
-                ax.set_ylabel(self.expanded_param_labels[iparam])
+                ax.plot(chain[j, :, iparam], lw=.5, alpha=.2)
+            ax.set_ylabel(self.expanded_param_labels[iparam])
 
         fig.tight_layout()
 
     def show_corner(self):
-        flatchain = self.flatchain
-        flatchain.shape
+        # Prefer any user-filtered flatchain (from apply_burnin), else fallback to backend
+        flatchain = getattr(self, 'flatchain', None)
+        if flatchain is None:
+            try:
+                flatchain = self.backend.get_chain(flat=True)
+            except Exception:
+                pass
+        if flatchain is None:
+            raise RuntimeError('No flatchain available. Run mcmc.run() first.')
+        _ = flatchain.shape  # ensure it's an ndarray
         fig = corner.corner(flatchain, labels=self.expanded_param_labels, quantiles=[0.16,0.50,0.84], show_titles=True)
+        
 
     def print_result(self):
+        # Ensure labels exist (in case user didn't call show_chains first)
+        if not hasattr(self, 'expanded_param_labels'):
+            indices = np.arange(1, self.meta.no_of_spline_points + 1).astype(str)
+            velocity_labels = ['vgsr' + i for i in indices]
+            pmra_labels = ['pmra' + i for i in indices] 
+            pmdec_labels = ['pmdec' + i for i in indices]
+            self.expanded_param_labels = (['pstream'] + 
+                                    velocity_labels + 
+                                    ['lsigvgsr', 'feh1', 'lsigfeh'] +
+                                    pmra_labels + 
+                                    ['lsigpmra'] +
+                                    pmdec_labels +
+                                    ['lsigpmdec', 'bv', 'lsigbv', 'bfeh', 'lsigbfeh', 'bpmra', 'lsigbpmra', 'bpmdec', 'lsigbpmdec'])
+        # Ensure flatchain is available; prefer backend with current burn-in settings if any
+        if getattr(self, 'flatchain', None) is None:
+            try:
+                self.flatchain = self.backend.get_chain(flat=True)
+            except Exception:
+                raise RuntimeError('No flatchain available. Run mcmc.run() first.')
+
         result = stream_funcs.process_chain(self.flatchain, labels = self.expanded_param_labels)
         if len(result) == 2:
             self.meds, self.errs = result
@@ -2747,14 +2906,26 @@ class MCMC:
         # print("{:<10} {:>10} {:>10} {:>10} {:>10}".format('param','med','err','exp(med)','exp(err)'))
         print("{:<10} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10}".format('param','med', 'em','ep','exp(med)', 'exp(em)','exp(ep)'))
         print('--------------------------------------------------------------------------------------')
+        em_dict = self.em if isinstance(self.em, dict) else {}
+        ep_dict = self.ep if isinstance(self.ep, dict) else {}
+        exp_em_dict = self.exp_em if isinstance(self.exp_em, dict) else {}
+        exp_ep_dict = self.exp_ep if isinstance(self.exp_ep, dict) else {}
         for label,v in self.meds.items():
             # if label[:8] == 'lpstream':
             #     print("{:<10} {:>10.3f} {:>10.3f} {:>10.5f} {:>10.5f}".format(label,v,errs[label], np.e**v, np.log(10)*(np.e**v)*errs[label]))
             if label[0] == 'l':
                 # print("{:<10} {:>10.3f} {:>10.3f} {:>10.3f} {:>10.3f} ".format(label,v,errs[label], exp_meds[label], exp_errs[label]))
-                print("{:<10} {:>10.3f} {:>10.3f} {:>10.3f} {:>10.3f} {:>10.3f} {:>10.3f}".format(label,v,self.em[label],self.ep[label], self.exp_meds[label], self.exp_em[label], self.exp_ep[label]))
+                print("{:<10} {:>10.3f} {:>10.3f} {:>10.3f} {:>10.3f} {:>10.3f} {:>10.3f}".format(
+                    label,
+                    v,
+                    em_dict.get(label, np.nan),
+                    ep_dict.get(label, np.nan),
+                    self.exp_meds[label],
+                    exp_em_dict.get(label, np.nan),
+                    exp_ep_dict.get(label, np.nan)
+                ))
             else:
-                print("{:<10} {:>10.3f} {:>10.3f} {:>10.3f}".format(label, v, self.em[label], self.ep[label]))
+                print("{:<10} {:>10.3f} {:>10.3f} {:>10.3f}".format(label, v, em_dict.get(label, np.nan), ep_dict.get(label, np.nan)))
             i += 1
 
     def memprob(self):
@@ -2806,8 +2977,11 @@ class MCMC:
         This method saves various outputs from the MCMC run including chains,
         parameters, and high-probability stream members.
         """
-        with open(self.output_dir + 'isochrone_path.txt', 'w') as f:
-            f.write(self.stream.isochrone_path)
+        # Ensure output directory ends with a slash for consistency
+        outdir = self.output_dir.rstrip('/') 
+
+        with open(outdir + '/isochrone_path.txt', 'w') as f:
+            f.write(getattr(self.stream, 'isochrone_path', ''))
 
         mcmc_dict = {
             "flatchain": self.flatchain,
@@ -2829,10 +3003,11 @@ class MCMC:
             exp_theta_final.append(self.exp_meds[label])
             errs_list.append(self.errs[label])
             exp_errs_list.append(self.exp_errs[label])
-            ep_list.append(self.ep[label])
-            em_list.append(np.abs(self.em[label]))
-            exp_ep_list.append(self.exp_ep[label])
-            exp_em_list.append(np.abs(self.exp_em[label]))
+            # Use safe dict access in case certain diagnostics aren't present
+            ep_list.append((self.ep if isinstance(self.ep, dict) else {}).get(label, np.nan))
+            em_list.append(abs((self.em if isinstance(self.em, dict) else {}).get(label, np.nan)))
+            exp_ep_list.append((self.exp_ep if isinstance(self.exp_ep, dict) else {}).get(label, np.nan))
+            exp_em_list.append(abs((self.exp_em if isinstance(self.exp_em, dict) else {}).get(label, np.nan)))
 
         nested_list_meds = stream_funcs.reshape_arr(theta_final, self.meta.array_lengths)
         nested_list_exp_meds = stream_funcs.reshape_arr(exp_theta_final, self.meta.array_lengths)
@@ -2857,30 +3032,57 @@ class MCMC:
             "expanded_param_labels": self.expanded_param_labels
         }
 
-        np.save(f'{self.output_dir}/mcmc_dict.npy', mcmc_dict)
-        np.save(f'{self.output_dir}/nested_dict.npy', nested_dict)
-        np.savetxt(self.output_dir + '/' + self.stream.streamName + '_' + str(getattr(self, 'phi2_wiggle', 'default')) + '.txt', np.array(theta_final))
+        np.save(f'{outdir}/mcmc_dict.npy', mcmc_dict)
+        np.save(f'{outdir}/nested_dict.npy', nested_dict)
+        np.savetxt(f'{outdir}/{self.stream.streamName}_{getattr(self, "phi2_wiggle", "default")}.txt', np.array(theta_final))
+
+        # Save spline points dict (user requested)
+        try:
+            phi1_spline_points = getattr(self.meta, 'phi1_spline_points', None)
+            # Prefer explicitly provided variants, else fall back to phi1_spline_points
+            pstream_phi1_spline_points = getattr(self.meta, 'pstream_phi1_spline_points', None)
+            if pstream_phi1_spline_points is None:
+                pstream_phi1_spline_points = phi1_spline_points
+
+            lsigv_phi1_spline_points = getattr(self.meta, 'lsigv_phi1_spline_points', None)
+            if lsigv_phi1_spline_points is None:
+                lsigv_phi1_spline_points = phi1_spline_points
+
+            spline_k = getattr(self.meta, 'spline_k', None)
+            spline_k_lsigv = getattr(self.meta, 'spline_k_lsigv', spline_k)
+
+            spline_points_dict = {
+                'phi1_spline_points': phi1_spline_points,
+                'pstream_phi1_spline_points': pstream_phi1_spline_points,
+                'lsigv_phi1_spline_points': lsigv_phi1_spline_points,
+                'spline_k': spline_k,
+                'spline_k_lsigv': spline_k_lsigv
+            }
+
+            np.save(f'{outdir}/spline_points_dict.npy', spline_points_dict)
+        except Exception as e:
+            print(f"Warning: could not save spline_points_dict: {e}")
 
         # Calculate membership probabilities if not already done
         if not hasattr(self, 'stream_prob'):
             self.stream_prob = self.memprob()
-        
+
         dataframe = self.stream.data.desi_data.copy()
         dataframe['stream_prob'] = self.stream_prob
 
         # Default minimum probability threshold
         min_prob = getattr(self, 'min_prob', 0.5)
-        
+
         # Save high-probability members (above min_prob threshold)
         high_prob_mask = self.stream_prob >= min_prob
         high_prob_dataframe = dataframe[high_prob_mask]
         high_prob_table = Table.from_pandas(high_prob_dataframe)
-        output_path = f'{self.output_dir}/{self.stream.streamName}_phi2_spline_{int(min_prob*100)}%_mem.fits'
+        output_path = f'{outdir}/{self.stream.streamName}_phi2_spline_{int(min_prob*100)}%_mem.fits'
         high_prob_table.write(output_path, format='fits', overwrite=True)
         print(f"Saved {len(high_prob_dataframe)} high-probability members to: {output_path}")
 
         # Save all stars with membership probabilities
         all_table = Table.from_pandas(dataframe)
-        output_path = f'{self.output_dir}/{self.stream.streamName}_phi2_spline_all%_mem.fits'
+        output_path = f'{outdir}/{self.stream.streamName}_phi2_spline_all%_mem.fits'
         all_table.write(output_path, format='fits', overwrite=True)
         print(f"Saved {len(dataframe)} total stars to: {output_path}")
