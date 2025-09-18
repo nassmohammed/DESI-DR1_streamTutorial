@@ -25,6 +25,7 @@ import warnings
 from astropy.utils.exceptions import AstropyDeprecationWarning
 import copy
 import multiprocessing
+from contextlib import redirect_stdout
 # Suppress specific Astropy deprecation warnings
 warnings.filterwarnings("ignore", category=AstropyDeprecationWarning, module='gala.dynamics.core')
 
@@ -3086,3 +3087,79 @@ class MCMC:
         output_path = f'{outdir}/{self.stream.streamName}_phi2_spline_all%_mem.fits'
         all_table.write(output_path, format='fits', overwrite=True)
         print(f"Saved {len(dataframe)} total stars to: {output_path}")
+
+        # ------------------------------------------------------------------
+        # Write human-readable metrics.txt summarizing the run
+        # Includes print_result output, stream info, truncations, star counts
+        # ------------------------------------------------------------------
+        # Ensure results exist and capture print_result() text
+        import io
+        if not hasattr(self, 'meds'):
+            # print_result also computes meds/errs and diagnostics
+            buf = io.StringIO()
+            try:
+                with redirect_stdout(buf):
+                    self.print_result()
+                print_result_text = buf.getvalue().strip()
+            except Exception as e:
+                print_result_text = f"Error running print_result(): {e}"
+        else:
+            buf = io.StringIO()
+            try:
+                with redirect_stdout(buf):
+                    self.print_result()
+                print_result_text = buf.getvalue().strip()
+            except Exception as e:
+                print_result_text = f"Error running print_result(): {e}"
+
+        # Basic counts
+        total_stars = int(len(dataframe))
+        stream_stars = int((dataframe['stream_prob'] > 0.5).sum())
+        background_stars = int((dataframe['stream_prob'] < 0.5).sum())
+
+        # Truncation info
+        trunc_params = getattr(self.meta, 'truncation_params', {})
+        vgsr_trunc = getattr(self.meta, 'vgsr_trunc', None)
+        feh_trunc = getattr(self.meta, 'feh_trunc', None)
+        pmra_trunc = getattr(self.meta, 'pmra_trunc', None)
+        pmdec_trunc = getattr(self.meta, 'pmdec_trunc', None)
+
+        # Isochrone path
+        isochrone_path = getattr(self.stream, 'isochrone_path', '') or 'N/A'
+
+        # Compose metrics text
+        metrics_lines = []
+        metrics_lines.append("DESI Stream MCMC Run Metrics")
+        metrics_lines.append("============================")
+        metrics_lines.append(f"Stream name: {self.stream.streamName}")
+        metrics_lines.append(f"Output directory: {outdir}")
+        metrics_lines.append(f"Isochrone path: {isochrone_path}")
+        metrics_lines.append("")
+        metrics_lines.append("Truncation settings:")
+        if trunc_params:
+            metrics_lines.append(f"  full: {trunc_params}")
+        if vgsr_trunc is not None:
+            metrics_lines.append(f"  vgsr: {vgsr_trunc}")
+        if feh_trunc is not None:
+            metrics_lines.append(f"  feh:  {feh_trunc}")
+        if pmra_trunc is not None:
+            metrics_lines.append(f"  pmra: {pmra_trunc}")
+        if pmdec_trunc is not None:
+            metrics_lines.append(f"  pmdec: {pmdec_trunc}")
+        metrics_lines.append("")
+        metrics_lines.append("Star counts (threshold p=0.5):")
+        metrics_lines.append(f"  total:       {total_stars}")
+        metrics_lines.append(f"  stream (>):  {stream_stars}")
+        metrics_lines.append(f"  background (<): {background_stars}")
+        metrics_lines.append("")
+        metrics_lines.append("MCMC parameter summary (print_result):")
+        metrics_lines.append("--------------------------------------")
+        metrics_lines.append(print_result_text)
+        metrics_lines.append("")
+
+        try:
+            with open(f"{outdir}/metrics.txt", "w") as f:
+                f.write("\n".join(metrics_lines))
+            print(f"Wrote metrics file: {outdir}/metrics.txt")
+        except Exception as e:
+            print(f"Warning: failed to write metrics.txt: {e}")

@@ -1,3 +1,4 @@
+from arrow import get
 from matplotlib.cm import ScalarMappable
 import matplotlib.pyplot as plt
 import numpy as np
@@ -93,78 +94,82 @@ def load_stream_mems(mem_path = '/home/jupyter-nassermoha/raid_nassermoha/data/r
 def load_desi_data(desi_path= '/raid/DESI/catalogs/loa/rv_output/241119/rvpix-loa.fits',
                   distance_path='/raid/DESI/catalogs/loa/rv_output/241119/rvsdistnn-loa-241126.fits',
                   decals_path='/raid/DESI/catalogs/loa/rv_output/241119/legacyphot-loa-241126.fits',
-                  desired_columns=None, fr=None):
+                  desired_columns=None, fr=None, local=False):
     """
     Joseph's code to load DESI data
     """
-    desired_columns = [
-    'VRAD', 'VRAD_ERR', 'RVS_WARN', 'PARALLAX', 'PARALLAX_ERROR', 
-    'RR_SPECTYPE', 'PMRA', 'PMRA_ERROR', 'PMDEC', 'PMDEC_ERROR', 
-    'TARGET_RA', 'TARGET_DEC', 'FEH', 'FEH_ERR', 'SOURCE_ID', 
-    'TARGETID', 'PMRA_PMDEC_CORR', 'PRIMARY'
-]
-    desi_hdu_indices = [1, 4]
-    desi_vrad_data = stream_funcs.load_fits_columns(desi_path, desired_columns, desi_hdu_indices)
+    if not local:
+        desired_columns = [
+        'VRAD', 'VRAD_ERR', 'RVS_WARN', 'PARALLAX', 'PARALLAX_ERROR', 
+        'RR_SPECTYPE', 'PMRA', 'PMRA_ERROR', 'PMDEC', 'PMDEC_ERROR', 
+        'TARGET_RA', 'TARGET_DEC', 'FEH', 'FEH_ERR', 'SOURCE_ID', 
+        'TARGETID', 'PMRA_PMDEC_CORR', 'PRIMARY'
+    ]
+        desi_hdu_indices = [1, 4]
+        desi_vrad_data = stream_funcs.load_fits_columns(desi_path, desired_columns, desi_hdu_indices)
 
-    # Load Sergey's distance data
-    dist_columns = ['TARGETID', 'dist_mod', 'dist_mod_err']
-    distance_data  = stream_funcs.load_fits_columns(distance_path, dist_columns)
+        # Load Sergey's distance data
+        dist_columns = ['TARGETID', 'dist_mod', 'dist_mod_err']
+        distance_data  = stream_funcs.load_fits_columns(distance_path, dist_columns)
 
-    # Load the DECaLS data
-    decal_columns = ['EBV', 'FLUX_G', 'FLUX_R']
-    decal_data = stream_funcs.load_fits_columns(decals_path, decal_columns)
+        # Load the DECaLS data
+        decal_columns = ['EBV', 'FLUX_G', 'FLUX_R']
+        decal_data = stream_funcs.load_fits_columns(decals_path, decal_columns)
 
-    # Combine the data
-    desi_data = table.hstack([desi_vrad_data, distance_data, decal_data])
-    del desi_vrad_data, distance_data, decal_data
+        # Combine the data
+        desi_data = table.hstack([desi_vrad_data, distance_data, decal_data])
+        del desi_vrad_data, distance_data, decal_data
 
-    # Delete the repeated TargetID column
-    if len(np.where(desi_data['TARGETID_1'].value == desi_data['TARGETID_2'].value)[0]) == len(desi_data):
-        desi_data.remove_columns(['TARGETID_2'])
-        desi_data.rename_column('TARGETID_1', 'TARGETID')
+        # Delete the repeated TargetID column
+        if len(np.where(desi_data['TARGETID_1'].value == desi_data['TARGETID_2'].value)[0]) == len(desi_data):
+            desi_data.remove_columns(['TARGETID_2'])
+            desi_data.rename_column('TARGETID_1', 'TARGETID')
+            
+        elif len(np.where(desi_data['TARGETID_1'].value == desi_data['TARGETID_2'].value)[0]) != len(desi_data):
+            print('The TargetID columns do not match')
+
+
+        # Drop the rows with NaN values in all columns
+        print(f"Length of DESI Data before Cuts: {len(desi_data)}")
+        drop_nan_columns = np.concatenate((desired_columns, decal_columns))
+        desi_dropped_nan_df = stream_funcs.dropna_Table(desi_data, columns = drop_nan_columns) # Custom function to drop rows with NaN values
+        print(f"Length of DESI Data after NaN cut: {len(desi_dropped_nan_df)}")
+
+        # Drop the rows with 'RVS_WARN' != 0 and 'RR_SPECTYPE' != 'STAR', are not duplicates, and with low enough radial velocity and metallicity errors
+        desi_dropped_vals = desi_dropped_nan_df[(desi_dropped_nan_df['RVS_WARN'] == 0) & (desi_dropped_nan_df['RR_SPECTYPE'] == 'STAR') & (desi_dropped_nan_df['PRIMARY']) &\
+            (desi_dropped_nan_df['VRAD_ERR'] < 10) & (desi_dropped_nan_df['FEH_ERR'] < 0.5)]
         
-    elif len(np.where(desi_data['TARGETID_1'].value == desi_data['TARGETID_2'].value)[0]) != len(desi_data):
-        print('The TargetID columns do not match')
+        # Drop the rows with 'RVS_WARN' != 0 and 'RR_SPECTYPE' != 'STAR', are not duplicates, and with low enough radial velocity and metallicity errors
+        sel_qual = (desi_dropped_nan_df['RVS_WARN'] == 0) & (desi_dropped_nan_df['RR_SPECTYPE'] == 'STAR') & (desi_dropped_nan_df['PRIMARY']) &\
+            (desi_dropped_nan_df['VRAD_ERR'] < 10) & (desi_dropped_nan_df['FEH_ERR'] < 0.5)
 
 
-    # Drop the rows with NaN values in all columns
-    print(f"Length of DESI Data before Cuts: {len(desi_data)}")
-    drop_nan_columns = np.concatenate((desired_columns, decal_columns))
-    desi_dropped_nan_df = stream_funcs.dropna_Table(desi_data, columns = drop_nan_columns) # Custom function to drop rows with NaN values
-    print(f"Length of DESI Data after NaN cut: {len(desi_dropped_nan_df)}")
+        print(f"Length of DESI data after RVS_WARN, RR_SPECTYPE, PRIMARY, VRAD_ERR, and FEH_ERR: {len(desi_dropped_vals)}")
 
-    # Drop the rows with 'RVS_WARN' != 0 and 'RR_SPECTYPE' != 'STAR', are not duplicates, and with low enough radial velocity and metallicity errors
-    desi_dropped_vals = desi_dropped_nan_df[(desi_dropped_nan_df['RVS_WARN'] == 0) & (desi_dropped_nan_df['RR_SPECTYPE'] == 'STAR') & (desi_dropped_nan_df['PRIMARY']) &\
-        (desi_dropped_nan_df['VRAD_ERR'] < 10) & (desi_dropped_nan_df['FEH_ERR'] < 0.5)]
-    
-    # Drop the rows with 'RVS_WARN' != 0 and 'RR_SPECTYPE' != 'STAR', are not duplicates, and with low enough radial velocity and metallicity errors
-    sel_qual = (desi_dropped_nan_df['RVS_WARN'] == 0) & (desi_dropped_nan_df['RR_SPECTYPE'] == 'STAR') & (desi_dropped_nan_df['PRIMARY']) &\
-        (desi_dropped_nan_df['VRAD_ERR'] < 10) & (desi_dropped_nan_df['FEH_ERR'] < 0.5)
+        # Drop the columns 'RVS_WARN' and 'RR_SPECTYPE' and convert to pandas DataFrame
+        desi_dropped_vals.remove_columns(['RVS_WARN', 'RR_SPECTYPE'])
+        desi_dropped_vals = desi_dropped_vals.to_pandas()
 
+        # Add a floor to the uncertainties since they are underestimated
+        desi_dropped_vals['VRAD_ERR'] = np.sqrt(desi_dropped_vals['VRAD_ERR']**2 + 0.9**2) ### Turn into its own column
+        desi_dropped_vals['PMRA_ERROR'] = np.sqrt(desi_dropped_vals['PMRA_ERROR']**2 + (np.sqrt(550)*0.001)**2) ### Turn into its own column
+        desi_dropped_vals['PMDEC_ERROR'] = np.sqrt(desi_dropped_vals['PMDEC_ERROR']**2 + (np.sqrt(550)*0.001)**2) ### Turn into its own column
+        desi_dropped_vals['FEH_ERR'] = np.sqrt(desi_dropped_vals['FEH_ERR']**2 + 0.01**2) ### Turn into its own column
 
-    print(f"Length of DESI data after RVS_WARN, RR_SPECTYPE, PRIMARY, VRAD_ERR, and FEH_ERR: {len(desi_dropped_vals)}")
+        # Delete some old variables
+        del desi_dropped_nan_df, desi_data
 
-    # Drop the columns 'RVS_WARN' and 'RR_SPECTYPE' and convert to pandas DataFrame
-    desi_dropped_vals.remove_columns(['RVS_WARN', 'RR_SPECTYPE'])
-    desi_dropped_vals = desi_dropped_vals.to_pandas()
+        desi_data = desi_dropped_vals
 
-    # Add a floor to the uncertainties since they are underestimated
-    desi_dropped_vals['VRAD_ERR'] = np.sqrt(desi_dropped_vals['VRAD_ERR']**2 + 0.9**2) ### Turn into its own column
-    desi_dropped_vals['PMRA_ERROR'] = np.sqrt(desi_dropped_vals['PMRA_ERROR']**2 + (np.sqrt(550)*0.001)**2) ### Turn into its own column
-    desi_dropped_vals['PMDEC_ERROR'] = np.sqrt(desi_dropped_vals['PMDEC_ERROR']**2 + (np.sqrt(550)*0.001)**2) ### Turn into its own column
-    desi_dropped_vals['FEH_ERR'] = np.sqrt(desi_dropped_vals['FEH_ERR']**2 + 0.01**2) ### Turn into its own column
-
-    # Delete some old variables
-    del desi_dropped_nan_df, desi_data
-
-    desi_data = desi_dropped_vals
-
-    del desi_dropped_vals
-    print('converting to phi1, phi2...')
-    desi_data.loc[:,'phi1'], desi_data.loc[:,'phi2']  = stream_funcs.ra_dec_to_phi1_phi2(fr, np.array(desi_data['TARGET_RA'])*u.deg, np.array(desi_data['TARGET_DEC'])*u.deg)
-    desi_data['VGSR'] =  np.array(stream_funcs.vhel_to_vgsr(np.array(desi_data['TARGET_RA'])*u.deg, np.array(desi_data['TARGET_DEC'])*u.deg, np.array(desi_data['VRAD'])*u.km/u.s).value)
-    desi_data['VGSR_ERR'] = desi_data['VRAD_ERR']
-    return desi_data
+        del desi_dropped_vals
+        print('converting to phi1, phi2...')
+        desi_data.loc[:,'phi1'], desi_data.loc[:,'phi2']  = stream_funcs.ra_dec_to_phi1_phi2(fr, np.array(desi_data['TARGET_RA'])*u.deg, np.array(desi_data['TARGET_DEC'])*u.deg)
+        desi_data['VGSR'] =  np.array(stream_funcs.vhel_to_vgsr(np.array(desi_data['TARGET_RA'])*u.deg, np.array(desi_data['TARGET_DEC'])*u.deg, np.array(desi_data['VRAD'])*u.km/u.s).value)
+        desi_data['VGSR_ERR'] = desi_data['VRAD_ERR']
+        return desi_data
+    else:
+         desi_data_tbl = table.Table.read(desi_path, format='fits')
+         desi_data = pd.DataFrame(desi_data_tbl.as_array())
 
 def get_sel_qual_mask(
     desi_path='/raid/DESI/catalogs/loa/rv_output/241119/rvpix-loa.fits',
@@ -989,16 +994,22 @@ class StreamMembers:
                 plt.savefig(fig_path, bbox_inches='tight', dpi=600)
             plt.show()
 
-    def do_orbit(self, progenitor_RA, theta_init=None, orbit_kwargs=None, with_plot=True):
+    def do_orbit(self, progenitor_RA, theta_init=None, with_plot=True, use_mcmc=True, **kwargs):
         """
         Run the orbit for the stream and plot the results.
         """
-        if orbit_kwargs is None:
-            orbit_kwargs = {
-                'fw' : np.linspace(0., 0.2, 2001) * u.Gyr,
-                'bw' : np.linspace(0, -0.2, 2001) * u.Gyr,
-                'progenitor_distance': self.min_dist/1000, # in kpc
-            }
+        # if orbit_kwargs is None:
+        #     orbit_kwargs = {
+        #         'fw' : np.linspace(0., 0.2, 2001) * u.Gyr,
+        #         'bw' : np.linspace(0, -0.2, 2001) * u.Gyr,
+        #         'progenitor_distance': self.min_dist/1000, # in kpc
+        #     }
+        orbit_kwargs = {
+            'fw' :  kwargs.get('fw',  np.linspace(0., 0.2, 2001) * u.Gyr),
+            'bw' : kwargs.get('bw',  np.linspace(0., 0.2, 2001) * u.Gyr),
+            'progenitor_distance': self.min_dist/1000, # in kpc
+        }
+
         if theta_init is None:
             if orbit_kwargs is None:
                 progenitor_dist = self.min_dist / 1000  # in kpc
@@ -1044,7 +1055,8 @@ class StreamMembers:
             orbit_kwargs["fw"],
             orbit_kwargs["bw"],
             theta_init,
-            use_position=True)
+            use_position=True, use_mcmc=use_mcmc, nwalkers = kwargs.get('nwalkers', 50), nsteps = kwargs.get('nsteps', 1000)
+        )
         self.orbit_ran = True
         if with_plot:
             o_ra, o_dec, o_pmra, o_pmdec, o_vrad, o_dist = ofuncs.orbit_model(results_o.x[0:5], progenitor_RA, orbit_kwargs["fw"], orbit_kwargs["bw"])
@@ -1703,7 +1715,7 @@ class StreamMembers:
         From Joseph's stream_funtions.py
         """
         stream_dir = self.stream_run_directory
-        mcmc_dict = np.load(stream_dir + 'mcmc_dict.npy', allow_pickle=True).item()
+        mcmc_dict = np.load(stream_dir + '/mcmc_dict.npy', allow_pickle=True).item()
 
         flatchain = mcmc_dict['flatchain']
         meds, errs = process_chain(flatchain, labels = mcmc_dict['extended_param_labels'])

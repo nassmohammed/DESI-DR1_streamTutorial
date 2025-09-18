@@ -8,6 +8,8 @@ import numpy as np
 import healpy as hp
 import astropy.coordinates as coord
 import pandas as pd
+import corner
+import emcee
 
 ## every non-orbit function was written by Joseph Tang
 
@@ -48,7 +50,7 @@ def ra_dec_to_phi1_phi2(frame, ra, dec):
     phi1, phi2 = transformed_skycoord.phi1.deg, transformed_skycoord.phi2.deg
     return phi1, phi2  
 
-def fit_orbit(stream_array, fr, progenitor_ra, fw, bw, theta, use_position=True):
+def fit_orbit(stream_array, fr, progenitor_ra, fw, bw, theta, use_position=True, use_mcmc=False, **kwargs):
     """
     Fit an orbit to the observed stream data.
 
@@ -65,8 +67,32 @@ def fit_orbit(stream_array, fr, progenitor_ra, fw, bw, theta, use_position=True)
     print('orbit parameters', orbit_param_label)
     print('intital guess', theta)
     
-    optfunc = lambda theta: negloglike(theta, fr, stream_array, progenitor_ra, errs, bw, fw, use_position=use_position)
-    results_o = minimize(optfunc, theta,  method="Powell")
+    if use_mcmc:
+        ndim = len(orbit_param_label)
+        nburn = kwargs.get('nburn', 100)
+        nwalkers = kwargs.get('nwalkers', 50)
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, negloglike, args=(fr, stream_array, progenitor_ra, errs, bw, fw, use_position))
+        p0 = [theta + 1e-4*np.random.randn(ndim) for i in range(nwalkers)]
+        print("Running burn-in...")
+        p0, _, _ = sampler.run_mcmc(p0, nburn, progress=True)
+        sampler.reset()
+        nsteps = kwargs.get('nsteps', 500)
+        print("Running production...")
+        sampler.run_mcmc(p0, nsteps, progress=True)
+        samples = sampler.get_chain(flat=True)
+        log_prob_samples = sampler.get_log_prob(flat=True)
+        max_prob_index = np.argmax(log_prob_samples)
+        best_fit_params = samples[max_prob_index]
+        results_o = type('result', (object,), {})()  # Create a simple object
+        results_o.x = best_fit_params
+        results_o.success = True
+        results_o.status = 0
+        results_o.message = "MCMC completed"
+
+
+    else: 
+        optfunc = lambda theta: negloglike(theta, fr, stream_array, progenitor_ra, errs, bw, fw, use_position=use_position)
+        results_o = minimize(optfunc, theta,  method="Powell")
 
     print("Optimization results_o:")
     print(f"Success: {results_o.success}")
@@ -103,46 +129,60 @@ def fit_orbit(stream_array, fr, progenitor_ra, fw, bw, theta, use_position=True)
 def negloglike(theta, fr, stream_array, ra_prog, param_errs, ts_rw, ts_ff, use_position=True):
     stream_ra, stream_dec, stream_pmra, stream_pmdec, stream_vrad = stream_array['RA'], stream_array['DEC'], stream_array['PMRA'], stream_array['PMDEC'], stream_array['VRAD']
     pmra_err, pmdec_err, vrad_err = param_errs #observed error
-
-    o1_model_ra, o1_model_dec, o1_model_pmra, o1_model_pmdec, o1_model_vlos, o1_model_dist = np.asarray(orbit_model(theta[0:5], ra_prog, ts_rw, ts_ff))
-    lsig_phi2, lsig_pmra, lsig_pmdec, lsig_vrad = theta[5:] #log sigmas
-
-    stream_phi1, stream_phi2 = ra_dec_to_phi1_phi2(fr, np.asarray(stream_ra)*u.deg, np.asarray(stream_dec)*u.deg)
-    o1_model_phi1, o1_model_phi2 = ra_dec_to_phi1_phi2(fr, o1_model_ra*u.deg, o1_model_dec*u.deg)
-
-    phi2_y = interp1d(o1_model_phi1, o1_model_phi2, kind='linear', fill_value='extrapolate')
-    pmra_y = interp1d(o1_model_phi1, o1_model_pmra, kind='linear', fill_value='extrapolate')
-    pmdec_y = interp1d(o1_model_phi1, o1_model_pmdec, kind='linear', fill_value='extrapolate')
-    vlos_y = interp1d(o1_model_phi1, o1_model_vlos, kind='linear', fill_value='extrapolate')
-
-
-    resid_phi2 = residuals(phi2_y, stream_phi2, stream_phi1)
-    resid_pmra = residuals(pmra_y, stream_pmra, stream_phi1)
-    resid_pmdec = residuals(pmdec_y, stream_pmdec, stream_phi1)
-    resid_vlos = residuals(vlos_y, stream_vrad, stream_phi1)
-
-    phi2_err = 0
-    chi2_phi2 = resid_phi2**2/(phi2_err**2 + (10**lsig_phi2)**2)
-    const_phi2 = np.log(2 * np.pi * (phi2_err**2+(10**lsig_phi2)**2))
-    logl_phi2 = -0.5*np.sum(chi2_phi2 + const_phi2)
-
-    chi2_pmra = resid_pmra**2/(pmra_err**2+ (10**lsig_pmra)**2)
-    const_pmra = np.log(2 * np.pi * (pmra_err**2+(10**lsig_pmra)**2))
-    logl_pmra = -0.5*np.sum(chi2_pmra + const_pmra)
-
-    chi2_pmdec = resid_pmdec**2/(pmdec_err**2+(10**lsig_pmdec)**2)
-    const_pmdec = np.log(2 * np.pi * (pmdec_err**2+(10**lsig_pmdec)**2))
-    logl_pmdec = -0.5*np.sum(chi2_pmdec + const_pmdec)
-
-    chi2_vlos = resid_vlos**2/(vrad_err**2+(10**lsig_vrad)**2)
-    const_vlos = np.log(2 * np.pi * (vrad_err**2+(10**lsig_vrad)**2))
-    logl_vlos = -0.5*np.sum(chi2_vlos + const_vlos)
-
-    if use_position:
-        neg_logl_tot = -logl_phi2 - logl_pmra - logl_pmdec - logl_vlos
+    if np.abs(theta[0]) > 90:
+        return np.inf
     else:
-        neg_logl_tot = -logl_pmra - logl_pmdec - logl_vlos
-    return neg_logl_tot
+        o1_model_ra, o1_model_dec, o1_model_pmra, o1_model_pmdec, o1_model_vlos, o1_model_dist = np.asarray(orbit_model(theta[0:5], ra_prog, ts_rw, ts_ff))
+        lsig_phi2, lsig_pmra, lsig_pmdec, lsig_vrad = theta[5:] #log sigmas
+
+        stream_phi1, stream_phi2 = ra_dec_to_phi1_phi2(fr, np.asarray(stream_ra)*u.deg, np.asarray(stream_dec)*u.deg)
+        o1_model_phi1, o1_model_phi2 = ra_dec_to_phi1_phi2(fr, o1_model_ra*u.deg, o1_model_dec*u.deg)
+
+        phi2_y = interp1d(o1_model_phi1, o1_model_phi2, kind='linear', fill_value='extrapolate')
+        pmra_y = interp1d(o1_model_phi1, o1_model_pmra, kind='linear', fill_value='extrapolate')
+        pmdec_y = interp1d(o1_model_phi1, o1_model_pmdec, kind='linear', fill_value='extrapolate')
+        vlos_y = interp1d(o1_model_phi1, o1_model_vlos, kind='linear', fill_value='extrapolate')
+
+
+        resid_phi2 = residuals(phi2_y, stream_phi2, stream_phi1)
+        resid_pmra = residuals(pmra_y, stream_pmra, stream_phi1)
+        resid_pmdec = residuals(pmdec_y, stream_pmdec, stream_phi1)
+        resid_vlos = residuals(vlos_y, stream_vrad, stream_phi1)
+
+        phi2_err = 0
+        chi2_phi2 = resid_phi2**2/(phi2_err**2 + (10**lsig_phi2)**2)
+        const_phi2 = np.log(2 * np.pi * (phi2_err**2+(10**lsig_phi2)**2))
+        logl_phi2 = -0.5*np.sum(chi2_phi2 + const_phi2)
+
+        chi2_pmra = resid_pmra**2/(pmra_err**2+ (10**lsig_pmra)**2)
+        const_pmra = np.log(2 * np.pi * (pmra_err**2+(10**lsig_pmra)**2))
+        logl_pmra = -0.5*np.sum(chi2_pmra + const_pmra)
+
+        chi2_pmdec = resid_pmdec**2/(pmdec_err**2+(10**lsig_pmdec)**2)
+        const_pmdec = np.log(2 * np.pi * (pmdec_err**2+(10**lsig_pmdec)**2))
+        logl_pmdec = -0.5*np.sum(chi2_pmdec + const_pmdec)
+
+        chi2_vlos = resid_vlos**2/(vrad_err**2+(10**lsig_vrad)**2)
+        const_vlos = np.log(2 * np.pi * (vrad_err**2+(10**lsig_vrad)**2))
+        logl_vlos = -0.5*np.sum(chi2_vlos + const_vlos)
+
+        if use_position:
+            neg_logl_tot = -logl_phi2 - logl_pmra - logl_pmdec - logl_vlos
+        else:
+            neg_logl_tot = -logl_pmra - logl_pmdec - logl_vlos
+        return neg_logl_tot
+
+def lnprior(theta, priors=None):
+    dec, pmra, pmdec, vrad, dist, lsig_phi2, lsig_pmra, lsig_pmdec, lsig_vrad = theta
+    if -90 < dec < 90 and -20 < pmra < 20 and -20 < pmdec < 20 and -500 < vrad < 500 and 0.1 < dist < 100 and -5 < lsig_phi2 < 3 and -5 < lsig_pmra < 3 and -5 < lsig_pmdec < 3 and -5 < lsig_vrad < 3:
+        return 0.0
+    return -np.inf
+
+def lnprob(theta, fr, stream_array, ra_prog, param_errs, ts_rw, ts_ff, use_position=True):
+    lp = lnprior(theta)
+    if not np.isfinite(lp):
+        return -np.inf
+    return lp - negloglike(theta, fr, stream_array, ra_prog, param_errs, ts_rw, ts_ff, use_position=use_position)
 
 def residuals(o1_interp_func, stream_val, stream_phi1):
     return np.abs(o1_interp_func(stream_phi1) - stream_val)
@@ -291,3 +331,4 @@ def orbit_interpolations(o_s):
         "dist": ointerp_dist
     }
     return df
+
