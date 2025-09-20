@@ -1055,35 +1055,35 @@ class StreamPlotter:
         """
         Plotting the isochrone and stars
         """
-        fig, ax = plt.subplots(figsize=(6, 7))
+        fig, ax = plt.subplots(figsize=(3*1.3, 4*1.3))
         if showStream:
             if absolute:
                 ax.scatter(self.data.sf_colour_idx, self.data.sf_abs_mag,
-                            **self.plot_params['sf_in_desi'])
+                            marker='o', facecolor='none', edgecolor='green', alpha=0.9, label='Known in DESI')
             else:
                 ax.scatter(self.data.sf_colour_idx, self.data.sf_r_mag,
                             **self.plot_params['sf_in_desi'])
         if background:
             if absolute:
                 ax.scatter(self.data.desi_colour_idx, self.data.desi_abs_mag,
-                            **self.plot_params['background'])
+                            marker='o', facecolor='none', edgecolor='green', alpha=0.9, label='Known in DESI')
             else:
                 ax.scatter(self.data.desi_colour_idx, self.data.desi_r_mag,
-                            **self.plot_params['background'])
+                            marker='o', facecolor='none', edgecolor='green', alpha=0.9, label='Known in DESI')
     
         ax.plot(self.stream.isochrone_fit(self.stream.dotter_r_mp), self.stream.dotter_r_mp,
-                c='b', ls='-.')
+                c='b', ls='-.', label='Dotter Isochrone')
         ax.plot(self.stream.isochrone_fit(self.stream.dotter_r_mp)+wiggle, self.stream.dotter_r_mp,
-                c='b', ls='dotted', alpha=0.5, label='Colour wiggle')
+                c='b', ls='dotted', alpha=0.5)
         ax.plot(self.stream.isochrone_fit(self.stream.dotter_r_mp)-wiggle, self.stream.dotter_r_mp,
                 c='b', ls='dotted', alpha=0.5)
-        if hasattr(self.data, 'cut_confirmed_sf_and_desi'):
-                if showStream:
-                    ax.scatter(
-                        self.data.cut_sf_colour_idx,
-                        self.data.cut_sf_abs_mag if absolute else self.data.cut_sf_r_mag,
-                        **self.plot_params['sf_in_desi_notsel']
-                    )
+        # if hasattr(self.data, 'cut_confirmed_sf_and_desi'):
+        #         if showStream:
+        #             ax.scatter(
+        #                 self.data.cut_sf_colour_idx,
+        #                 self.data.cut_sf_abs_mag if absolute else self.data.cut_sf_r_mag,
+        #                 **self.plot_params['sf_in_desi_notsel']
+        #             )
         # Hard coded
         if BHB:
 
@@ -1113,9 +1113,10 @@ class StreamPlotter:
         ax.set_xlabel('g-r',fontsize=15)
         ax.set_ylabel('$M_r$',fontsize=15)
         ax.set_xlim(-0.5, 1.2)
-        ax.set_ylim(-1.5, 8)
+        ax.set_ylim(-0, 4)
         ax.invert_yaxis()
         stream_funcs.plot_form(ax)
+        return fig, ax
 
     def sixD_plot(self, showStream=True, show_sf_only=False, background=True, save=False, stream_frame=True, galstream=False, show_cut=False, 
                   show_initial_splines=False, show_optimized_splines=False, show_mcmc_splines=False, show_sf_errors=True, 
