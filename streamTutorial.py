@@ -2672,6 +2672,9 @@ class MCMC:
         Backward compatibility: if called with legacy keywords `nburnin` and
         `nstep`, we will ignore the two-phase pattern and instead run for
         `nsteps = nburnin + nstep`.
+
+        Progress printing added: runs in chunks and prints progress, elapsed time,
+        ETA and mean acceptance fraction after each chunk.
         """
         from multiprocessing import Pool
         self.nproc = nproc
@@ -2683,6 +2686,9 @@ class MCMC:
             nstep_legacy = int(kwargs.get('nstep', 0) or 0)
             nsteps = nburnin_legacy + nstep_legacy if (nburnin_legacy + nstep_legacy) > 0 else nsteps
             print(f"[MCMC] Back-compat: using nsteps = nburnin({nburnin_legacy}) + nstep({nstep_legacy}) = {nsteps}")
+
+        # optional chunk size for progress updates
+        chunk = int(kwargs.pop('chunk', 200))
 
         self.nsteps = int(nsteps)
         if self.use_optimized_start:
@@ -2710,22 +2716,66 @@ class MCMC:
 
             # Special clipping for pstream to [0, 1] if it's the first parameter
             p0s[:,0] = np.clip(p0s[:,0], 1e-10, 1 - 1e-10)
-                
-            start = time.time()
-            print(f"Running a single continuous chain for {self.nsteps} iterations starting from {start_label} parameters...")
+
+            start_time = time.time()
+            print(f"Running a single continuous chain for {self.nsteps} iterations starting from {start_label} parameters (chunk={chunk})...")
+
             es = emcee.EnsembleSampler(
                 self.meta.nwalkers, len(self.meta.flat_p0_guess), stream_funcs.spline_lnprob_1D,
-                args=(self.meta.prior_arr, self.meta.phi1_spline_points, 
-                    self.meta.stream.data.desi_data['VGSR'].values, self.meta.stream.data.desi_data['VRAD_ERR'].values,
-                    self.meta.stream.data.desi_data['FEH'].values, self.meta.stream.data.desi_data['FEH_ERR'].values,
-                    self.meta.stream.data.desi_data['PMRA'].values, self.meta.stream.data.desi_data['PMRA_ERROR'].values,
-                    self.meta.stream.data.desi_data['PMDEC'].values, self.meta.stream.data.desi_data['PMDEC_ERROR'].values,
-                    self.meta.stream.data.desi_data['phi1'].values, 
-                    True, False, True, self.meta.spline_k, self.meta.array_lengths,
-                    self.meta.vgsr_trunc, self.meta.feh_trunc, self.meta.pmra_trunc, self.meta.pmdec_trunc),
+                args=(self.meta.prior_arr, self.meta.phi1_spline_points,
+                      self.meta.stream.data.desi_data['VGSR'].values, self.meta.stream.data.desi_data['VRAD_ERR'].values,
+                      self.meta.stream.data.desi_data['FEH'].values, self.meta.stream.data.desi_data['FEH_ERR'].values,
+                      self.meta.stream.data.desi_data['PMRA'].values, self.meta.stream.data.desi_data['PMRA_ERROR'].values,
+                      self.meta.stream.data.desi_data['PMDEC'].values, self.meta.stream.data.desi_data['PMDEC_ERROR'].values,
+                      self.meta.stream.data.desi_data['phi1'].values,
+                      True, False, True, self.meta.spline_k, self.meta.array_lengths,
+                      self.meta.vgsr_trunc, self.meta.feh_trunc, self.meta.pmra_trunc, self.meta.pmdec_trunc),
                 pool=pool, backend=self.backend)
-            _ = es.run_mcmc(p0s, self.nsteps)
-            print(f'Took {(time.time()-start):.1f} seconds ({(time.time()-start)/60:.1f} minutes)')
+
+            steps_done = 0
+            # Run in chunks to print progress
+            while steps_done < self.nsteps:
+                to_run = min(chunk, self.nsteps - steps_done)
+                try:
+                    state = es.run_mcmc(p0s, to_run, progress=False)
+                except TypeError:
+                    # Older emcee versions may not accept progress kwarg; try without it
+                    state = es.run_mcmc(p0s, to_run)
+
+                # try to extract last walker positions for next chunk
+                try:
+                    # get_chain returns array (nsteps_total, nwalkers, ndim)
+                    chain_all = es.get_chain()
+                    last = chain_all[-1]  # shape (nwalkers, ndim)
+                    p0s = last.copy()
+                except Exception:
+                    # fallback: some emcee versions return a 'coords' attribute in state
+                    if hasattr(state, 'coords'):
+                        p0s = state.coords.copy()
+                    else:
+                        # if we cannot obtain updated positions, break (should be rare)
+                        print("Warning: could not obtain walker positions for next chunk; stopping early.")
+                        break
+
+                steps_done += to_run
+                elapsed = time.time() - start_time
+                # compute mean acceptance fraction if available
+                try:
+                    acc = np.mean(es.acceptance_fraction)
+                except Exception:
+                    acc = np.nan
+
+                # estimate remaining time
+                if steps_done > 0:
+                    rate = elapsed / steps_done
+                    eta = rate * (self.nsteps - steps_done)
+                else:
+                    eta = np.nan
+
+                print(f"[MCMC] {steps_done}/{self.nsteps} steps completed | elapsed: {elapsed:.1f}s | ETA: {eta:.1f}s | mean acc.: {acc:.3f}")
+
+            total_elapsed = time.time() - start_time
+            print(f"[MCMC] Finished {steps_done} steps in {total_elapsed:.1f}s ({total_elapsed/60:.1f} m)")
 
             # Store chains in the shape expected by show_chains(): (nwalkers, nsteps, ndim)
             try:
