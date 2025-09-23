@@ -1930,6 +1930,7 @@ def spline_lnprob_1D(theta, prior, spline_x_points, vgsr, vgsr_err, feh, feh_err
         ['bv', 'lsigbv', 'bfeh', 'lsigbfeh', 'bpmra', 'lsigbpmra', 'bpmdec', 'lsigbpmdec']
     )
 
+    
     for i in range(len(theta)):
         if (theta[i] < prior[i][0]) or (theta[i] > prior[i][1]):
             
