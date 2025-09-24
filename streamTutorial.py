@@ -84,7 +84,7 @@ class Data:
             )
         else:
             desi_data_tbl = table.Table.read(self.desi_path, format='fits')
-            self.desi_data = pd.DataFrame(desi_data_tbl.as_array())
+            self.desi_data = desi_data_tbl.to_pandas()
 
 
         # Lets load the STREAMFINDER data for Gaia DR3
@@ -2664,7 +2664,9 @@ class MCMC:
         self.backend = emcee.backends.HDFBackend(self.output_dir+'/'+self.stream.streamName+str(self.meta.no_of_spline_points)+'.h5')
         self.backend.reset(self.meta.nwalkers,len(self.meta.p0))
     #WIP
-    def run(self, nproc=32, nsteps=10000, use_optimized_start=True, **kwargs):
+
+    def run(self, nproc=32, nsteps=10000, use_optimized_start=True,
+            extra_log_prior=None, gaussian_prior=None, **kwargs):
         """
         Run a single continuous MCMC chain for `nsteps` iterations. Burn-in can
         be applied later using `apply_burnin(discard, thin)`.
@@ -2675,6 +2677,13 @@ class MCMC:
 
         Progress printing added: runs in chunks and prints progress, elapsed time,
         ETA and mean acceptance fraction after each chunk.
+
+                Optional priors:
+                - extra_log_prior: callable(theta) -> log_prior contribution. This is added
+                    to the base log-prob from `stream_funcs.spline_lnprob_1D`.
+                - gaussian_prior: tuple (idx, mu, sigma) to apply a simple Gaussian prior
+                    on parameter at index `idx`. If both are provided, `extra_log_prior`
+                    takes precedence.
         """
         from multiprocessing import Pool
         self.nproc = nproc
@@ -2719,9 +2728,48 @@ class MCMC:
 
             start_time = time.time()
             print(f"Running a single continuous chain for {self.nsteps} iterations starting from {start_label} parameters (chunk={chunk})...")
+            
+            # Build optional extra prior callable
+            prior_callable = None
+            if callable(extra_log_prior):
+                prior_callable = extra_log_prior
+                print("[MCMC] Using custom extra_log_prior callable.")
+            elif gaussian_prior is not None:
+                try:
+                    idx, mu, sigma = gaussian_prior
+                    assert sigma > 0
+                    def _gauss_prior(theta, _idx=idx, _mu=mu, _sig=sigma):
+                        # unnormalized Gaussian log prior
+                        x = theta[_idx]
+                        return -0.5 * ((x - _mu) / _sig) ** 2
+                    prior_callable = _gauss_prior
+                    print(f"[MCMC] Using Gaussian prior on param[{idx}] with mu={mu}, sigma={sigma}.")
+                except Exception as _e:
+                    print(f"[MCMC] Warning: invalid gaussian_prior specification: {gaussian_prior} ({_e}). Ignoring.")
+                    prior_callable = None
+
+            # Define lnprob function (base or wrapped with extra prior)
+            _base_lnprob = stream_funcs.spline_lnprob_1D
+
+            if prior_callable is not None:
+                def _lnprob_with_extra(theta, *base_args):
+                    lp = _base_lnprob(theta, *base_args)
+                    # If base is invalid, keep it invalid
+                    if not np.isfinite(lp):
+                        return -np.inf
+                    try:
+                        lp_extra = prior_callable(theta)
+                    except Exception:
+                        lp_extra = 0.0
+                    if not np.isfinite(lp_extra):
+                        return -np.inf
+                    return lp + lp_extra
+                lnprob_func = _lnprob_with_extra
+            else:
+                lnprob_func = _base_lnprob
 
             es = emcee.EnsembleSampler(
-                self.meta.nwalkers, len(self.meta.flat_p0_guess), stream_funcs.spline_lnprob_1D,
+                self.meta.nwalkers, len(self.meta.flat_p0_guess), lnprob_func,
                 args=(self.meta.prior_arr, self.meta.phi1_spline_points,
                       self.meta.stream.data.desi_data['VGSR'].values, self.meta.stream.data.desi_data['VRAD_ERR'].values,
                       self.meta.stream.data.desi_data['FEH'].values, self.meta.stream.data.desi_data['FEH_ERR'].values,
