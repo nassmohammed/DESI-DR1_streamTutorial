@@ -2441,8 +2441,9 @@ class StreamPlotter:
 class MCMeta:
     """
     For creating and plotting a spline track of the stream.
+    use_all_guess: Uses all of the available SF data for initial guess
     """
-    def __init__(self, no_of_spline_points, stream_object, sf_data, truncation_params=None, phi1_min=None, phi1_max=None):
+    def __init__(self, no_of_spline_points, stream_object, sf_data, truncation_params=None, phi1_min=None, phi1_max=None, use_all_guess=False):
         self.stream = stream_object
         self.no_of_spline_points = no_of_spline_points
         self.sf_data = sf_data
@@ -2495,23 +2496,23 @@ class MCMeta:
 
         p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['VGSR'].values, 1)
         self.vgsr_fit = np.poly1d(p)
-        self.initial_params['lsigvgsr'] = np.log10(((self.sf_data['VGSR'].values.std())**2 - (np.mean(self.sf_data['VRAD_ERR'].values))**2)**0.5)
+        self.initial_params['lsigvgsr'] = np.log10((np.abs((self.sf_data['VGSR'].values.std())**2 - (np.mean(self.sf_data['VRAD_ERR'].values)))**2)**0.5)
         self.initial_params['vgsr_spline_points'] = self.vgsr_fit(self.phi1_spline_points)
         print(f"Stream VGSR dispersion from trimmed SF: {10**self.initial_params['lsigvgsr']:.2f} km/s")
 
         self.initial_params['feh1'] = self.sf_data['FEH'].values.mean()
-        self.initial_params['lsigfeh'] = np.log10(((self.sf_data['FEH'].values.std())**2 - (np.mean(self.sf_data['FEH_ERR'].values))**2)**0.5)
+        self.initial_params['lsigfeh'] = np.log10((np.abs((self.sf_data['FEH'].values.std())**2 - (np.mean(self.sf_data['FEH_ERR'].values)))**2)**0.5)
         print(f'Stream mean metallicity from trimmed SF: {self.initial_params["feh1"]:.2f} +- {10**self.initial_params["lsigfeh"]:.3f} dex')
 
         p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMRA'].values, 1)
         self.pmra_fit = np.poly1d(p)
-        self.initial_params['lsigpmra'] = np.log10(((self.sf_data['PMRA'].values.std())**2 - (np.mean(self.sf_data['PMRA_ERROR'].values))**2)**0.5)
+        self.initial_params['lsigpmra'] = np.log10((np.abs((self.sf_data['PMRA'].values.std())**2 - (np.mean(self.sf_data['PMRA_ERROR'].values)))**2)**0.5)
         self.initial_params['pmra_spline_points'] = self.pmra_fit(self.phi1_spline_points)
         print(f"Stream PMRA dispersion from trimmed SF: {10**self.initial_params['lsigpmra']:.2f} mas/yr")
 
         p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMDEC'].values, 1)
         self.pmdec_fit = np.poly1d(p)
-        self.initial_params['lsigpmdec'] = np.log10(((self.sf_data['PMDEC'].values.std())**2 - (np.mean(self.sf_data['PMDEC_ERROR'].values))**2)**0.5)
+        self.initial_params['lsigpmdec'] = np.log10((np.abs((self.sf_data['PMDEC'].values.std())**2 - (np.mean(self.sf_data['PMDEC_ERROR'].values)))**2)**0.5)
         self.initial_params['pmdec_spline_points'] = self.pmdec_fit(self.phi1_spline_points)
         print(f"Stream PMDEC dispersion from trimmed SF: {10**self.initial_params['lsigpmdec']:.2f} mas/yr")
 
