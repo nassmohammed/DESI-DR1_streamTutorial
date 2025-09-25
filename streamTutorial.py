@@ -2587,7 +2587,7 @@ class MCMeta:
         )
         # Run optimization
         print("Running optimization...")
-        self.sp_result = sp.optimize.minimize(optfunc, self.flat_p0_guess, method="COBYLA", options={'maxiter': 20000, 'maxfev': 20000})
+        self.sp_result = sp.optimize.minimize(optfunc, self.flat_p0_guess, method="Nelder-Mead")
         print(self.sp_result.message)
 
         self.reshaped_result = stream_funcs.reshape_arr(self.sp_result.x, self.array_lengths)
