@@ -1904,10 +1904,10 @@ def spline_lnprob_1D(theta, prior, spline_x_points, vgsr, vgsr_err, feh, feh_err
     pstream, \
     vgsr_spline_points, lsigv, \
     feh1, lsigfeh, \
-    pmra_spline_points, \
-    pmdec_spline_points, \
+    pmra_spline_points,lsigpmra, \
+    pmdec_spline_points,lsigpmdec,\
     bv, lsigbv, bfeh, lsigbfeh, bpmra, lsigbpmra, bpmdec, lsigbpmdec = reshaped_theta
-    lsigpmra, lsigpmdec = np.log10(0.09), np.log10(0.09)
+    #lsigpmra, lsigpmdec = np.log10(0.09), np.log10(0.09)
     
     if feh_fit == False:
         feh1_min, feh1_max, lsigfeh_min, lsigfeh_max, bfeh_min, bfeh_max = -np.inf, np.inf, -np.inf, np.inf, -np.inf, np.inf
