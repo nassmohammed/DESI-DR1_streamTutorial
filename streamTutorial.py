@@ -25,7 +25,6 @@ import warnings
 from astropy.utils.exceptions import AstropyDeprecationWarning
 import copy
 import multiprocessing
-from contextlib import redirect_stdout
 # Suppress specific Astropy deprecation warnings
 warnings.filterwarnings("ignore", category=AstropyDeprecationWarning, module='gala.dynamics.core')
 
@@ -84,7 +83,7 @@ class Data:
             )
         else:
             desi_data_tbl = table.Table.read(self.desi_path, format='fits')
-            self.desi_data = desi_data_tbl.to_pandas()
+            self.desi_data = pd.DataFrame(desi_data_tbl.as_array())
 
 
         # Lets load the STREAMFINDER data for Gaia DR3
@@ -1006,8 +1005,6 @@ class StreamPlotter:
         stream_funcs.plot_form(ax[0])  
         stream_funcs.plot_form(ax[1]) 
         stream_funcs.plot_form(ax[2])
-
-        return fig, ax
 
     def feh_plot(self, showStream=True, show_sf_only=False, background=True, save=False, stream_frame=True):
         """
@@ -2443,9 +2440,8 @@ class StreamPlotter:
 class MCMeta:
     """
     For creating and plotting a spline track of the stream.
-    use_all_guess: Uses all of the available SF data for initial guess
     """
-    def __init__(self, no_of_spline_points, stream_object, sf_data, truncation_params=None, phi1_min=None, phi1_max=None, use_all_guess=False):
+    def __init__(self, no_of_spline_points, stream_object, sf_data, truncation_params=None, phi1_min=None, phi1_max=None):
         self.stream = stream_object
         self.no_of_spline_points = no_of_spline_points
         self.sf_data = sf_data
@@ -2498,23 +2494,23 @@ class MCMeta:
 
         p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['VGSR'].values, 1)
         self.vgsr_fit = np.poly1d(p)
-        self.initial_params['lsigvgsr'] = np.log10((np.abs((self.sf_data['VGSR'].values.std())**2 - (np.mean(self.sf_data['VRAD_ERR'].values)))**2)**0.5)
+        self.initial_params['lsigvgsr'] = np.log10(((self.sf_data['VGSR'].values.std())**2 - (np.mean(self.sf_data['VRAD_ERR'].values))**2)**0.5)
         self.initial_params['vgsr_spline_points'] = self.vgsr_fit(self.phi1_spline_points)
         print(f"Stream VGSR dispersion from trimmed SF: {10**self.initial_params['lsigvgsr']:.2f} km/s")
 
         self.initial_params['feh1'] = self.sf_data['FEH'].values.mean()
-        self.initial_params['lsigfeh'] = np.log10((np.abs((self.sf_data['FEH'].values.std())**2 - (np.mean(self.sf_data['FEH_ERR'].values)))**2)**0.5)
+        self.initial_params['lsigfeh'] = np.log10(((self.sf_data['FEH'].values.std())**2 - (np.mean(self.sf_data['FEH_ERR'].values))**2)**0.5)
         print(f'Stream mean metallicity from trimmed SF: {self.initial_params["feh1"]:.2f} +- {10**self.initial_params["lsigfeh"]:.3f} dex')
 
         p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMRA'].values, 1)
         self.pmra_fit = np.poly1d(p)
-        self.initial_params['lsigpmra'] = np.log10((np.abs((self.sf_data['PMRA'].values.std())**2 - (np.mean(self.sf_data['PMRA_ERROR'].values)))**2)**0.5)
+        self.initial_params['lsigpmra'] = np.log10(((self.sf_data['PMRA'].values.std())**2 - (np.mean(self.sf_data['PMRA_ERROR'].values))**2)**0.5)
         self.initial_params['pmra_spline_points'] = self.pmra_fit(self.phi1_spline_points)
         print(f"Stream PMRA dispersion from trimmed SF: {10**self.initial_params['lsigpmra']:.2f} mas/yr")
 
         p = np.polyfit(self.sf_data['phi1'].values, self.sf_data['PMDEC'].values, 1)
         self.pmdec_fit = np.poly1d(p)
-        self.initial_params['lsigpmdec'] = np.log10((np.abs((self.sf_data['PMDEC'].values.std())**2 - (np.mean(self.sf_data['PMDEC_ERROR'].values)))**2)**0.5)
+        self.initial_params['lsigpmdec'] = np.log10(((self.sf_data['PMDEC'].values.std())**2 - (np.mean(self.sf_data['PMDEC_ERROR'].values))**2)**0.5)
         self.initial_params['pmdec_spline_points'] = self.pmdec_fit(self.phi1_spline_points)
         print(f"Stream PMDEC dispersion from trimmed SF: {10**self.initial_params['lsigpmdec']:.2f} mas/yr")
 
@@ -2575,21 +2571,23 @@ class MCMeta:
         self.param_labels = ['pstream', 'vgsr_spline_points', 'lsigvgsr', 'feh1', 'lsigfeh', 
             'pmra_spline_points', 'lsigpmra', 'pmdec_spline_points', 'lsigpmdec',
                 'bv', 'lsigbv', 'bfeh', 'lsigbfeh', 'bpmra', 'lsigbpmra', 'bpmdec', 'lsigbpmdec']
-        optfunc = lambda theta: -stream_funcs.spline_lnprob_1D(
-            theta, self.prior_arr, self.phi1_spline_points,  # Only phi1_spline_points needed
-            self.stream.data.desi_data['VGSR'], self.stream.data.desi_data['VRAD_ERR'],
-            self.stream.data.desi_data['FEH'], self.stream.data.desi_data['FEH_ERR'],
-            self.stream.data.desi_data['PMRA'], self.stream.data.desi_data['PMRA_ERROR'],
-            self.stream.data.desi_data['PMDEC'], self.stream.data.desi_data['PMDEC_ERROR'],
-            self.stream.data.desi_data['phi1'], 
-            trunc_fit=True, feh_fit=True, assert_prior=False, k=self.spline_k, 
-            reshape_arr_shape=self.array_lengths,
-            vgsr_trunc=self.vgsr_trunc, feh_trunc=self.feh_trunc, 
+        optfunc = lambda theta: -stream_funcs.lnprob(
+            theta,
+            self.prior_arr,
+            self.phi1_spline_points,
+            self.stream.data.desi_data['VGSR'].values, self.stream.data.desi_data['VRAD_ERR'].values,
+            self.stream.data.desi_data['FEH'].values, self.stream.data.desi_data['FEH_ERR'].values,
+            self.stream.data.desi_data['PMRA'].values, self.stream.data.desi_data['PMRA_ERROR'].values,
+            self.stream.data.desi_data['PMDEC'].values, self.stream.data.desi_data['PMDEC_ERROR'].values,
+            self.stream.data.desi_data['phi1'].values,
+            trunc_fit=True, assert_prior=False, feh_fit=True,
+            k=self.spline_k, reshape_arr_shape=self.array_lengths,
+            vgsr_trunc=self.vgsr_trunc, feh_trunc=self.feh_trunc,
             pmra_trunc=self.pmra_trunc, pmdec_trunc=self.pmdec_trunc
         )
         # Run optimization
         print("Running optimization...")
-        self.sp_result = sp.optimize.minimize(optfunc, self.flat_p0_guess, method="Nelder-Mead")
+        self.sp_result = sp.optimize.minimize(optfunc, self.flat_p0_guess, method="COBYLA", options={'maxiter': 20000, 'maxfev': 20000})
         print(self.sp_result.message)
 
         self.reshaped_result = stream_funcs.reshape_arr(self.sp_result.x, self.array_lengths)
@@ -2628,18 +2626,18 @@ class MCMeta:
             p0s[:, i] = np.clip(p0s[:, i], min_val + buffer, max_val - buffer)
 
         # Test likelihood for all walkers using the modified function
-        lkhds = [stream_funcs.spline_lnprob_1D(
-            p0s[j], self.prior_arr, self.phi1_spline_points, 
-            self.stream.data.desi_data['VGSR'], self.stream.data.desi_data['VRAD_ERR'],
-            self.stream.data.desi_data['FEH'], self.stream.data.desi_data['FEH_ERR'],
-            self.stream.data.desi_data['PMRA'], self.stream.data.desi_data['PMRA_ERROR'],
-            self.stream.data.desi_data['PMDEC'], self.stream.data.desi_data['PMDEC_ERROR'],
-            self.stream.data.desi_data['phi1'], 
-            trunc_fit=True, feh_fit=True, assert_prior=True, k=self.spline_k, 
-            reshape_arr_shape=self.array_lengths,
-            vgsr_trunc=self.vgsr_trunc, feh_trunc=self.feh_trunc, 
-            pmra_trunc=self.pmra_trunc, pmdec_trunc=self.pmdec_trunc
-        ) for j in range(self.nwalkers)]
+            lkhds = [stream_funcs.lnprob(
+                p0s[j], self.prior_arr, self.phi1_spline_points, 
+                self.stream.data.desi_data['VGSR'].values, self.stream.data.desi_data['VRAD_ERR'].values,
+                self.stream.data.desi_data['FEH'].values, self.stream.data.desi_data['FEH_ERR'].values,
+                self.stream.data.desi_data['PMRA'].values, self.stream.data.desi_data['PMRA_ERROR'].values,
+                self.stream.data.desi_data['PMDEC'].values, self.stream.data.desi_data['PMDEC_ERROR'].values,
+                self.stream.data.desi_data['phi1'].values, 
+                trunc_fit=True, assert_prior=True, feh_fit=True, k=self.spline_k, 
+                reshape_arr_shape=self.array_lengths,
+                vgsr_trunc=self.vgsr_trunc, feh_trunc=self.feh_trunc, 
+                pmra_trunc=self.pmra_trunc, pmdec_trunc=self.pmdec_trunc
+            ) for j in range(self.nwalkers)]
 
         # Check if prior is good - this is the key test from your original code
         if sum(np.array(lkhds) > -9e9) == self.nwalkers:
@@ -2667,9 +2665,7 @@ class MCMC:
         self.backend = emcee.backends.HDFBackend(self.output_dir+'/'+self.stream.streamName+str(self.meta.no_of_spline_points)+'.h5')
         self.backend.reset(self.meta.nwalkers,len(self.meta.p0))
     #WIP
-
-    def run(self, nproc=32, nsteps=10000, use_optimized_start=True,
-            extra_log_prior=None, gaussian_prior=None, **kwargs):
+    def run(self, nproc=32, nsteps=10000, use_optimized_start=True, **kwargs):
         """
         Run a single continuous MCMC chain for `nsteps` iterations. Burn-in can
         be applied later using `apply_burnin(discard, thin)`.
@@ -2677,16 +2673,6 @@ class MCMC:
         Backward compatibility: if called with legacy keywords `nburnin` and
         `nstep`, we will ignore the two-phase pattern and instead run for
         `nsteps = nburnin + nstep`.
-
-        Progress printing added: runs in chunks and prints progress, elapsed time,
-        ETA and mean acceptance fraction after each chunk.
-
-                Optional priors:
-                - extra_log_prior: callable(theta) -> log_prior contribution. This is added
-                    to the base log-prob from `stream_funcs.spline_lnprob_1D`.
-                - gaussian_prior: tuple (idx, mu, sigma) to apply a simple Gaussian prior
-                    on parameter at index `idx`. If both are provided, `extra_log_prior`
-                    takes precedence.
         """
         from multiprocessing import Pool
         self.nproc = nproc
@@ -2698,9 +2684,6 @@ class MCMC:
             nstep_legacy = int(kwargs.get('nstep', 0) or 0)
             nsteps = nburnin_legacy + nstep_legacy if (nburnin_legacy + nstep_legacy) > 0 else nsteps
             print(f"[MCMC] Back-compat: using nsteps = nburnin({nburnin_legacy}) + nstep({nstep_legacy}) = {nsteps}")
-
-        # optional chunk size for progress updates
-        chunk = int(kwargs.pop('chunk', 200))
 
         self.nsteps = int(nsteps)
         if self.use_optimized_start:
@@ -2728,105 +2711,25 @@ class MCMC:
 
             # Special clipping for pstream to [0, 1] if it's the first parameter
             p0s[:,0] = np.clip(p0s[:,0], 1e-10, 1 - 1e-10)
-
-            start_time = time.time()
-            print(f"Running a single continuous chain for {self.nsteps} iterations starting from {start_label} parameters (chunk={chunk})...")
-            
-            # Build optional extra prior callable
-            prior_callable = None
-            if callable(extra_log_prior):
-                prior_callable = extra_log_prior
-                print("[MCMC] Using custom extra_log_prior callable.")
-            elif gaussian_prior is not None:
-                try:
-                    idx, mu, sigma = gaussian_prior
-                    assert sigma > 0
-                    def _gauss_prior(theta, _idx=idx, _mu=mu, _sig=sigma):
-                        # unnormalized Gaussian log prior
-                        x = theta[_idx]
-                        return -0.5 * ((x - _mu) / _sig) ** 2
-                    prior_callable = _gauss_prior
-                    print(f"[MCMC] Using Gaussian prior on param[{idx}] with mu={mu}, sigma={sigma}.")
-                except Exception as _e:
-                    print(f"[MCMC] Warning: invalid gaussian_prior specification: {gaussian_prior} ({_e}). Ignoring.")
-                    prior_callable = None
-
-            # Define lnprob function (base or wrapped with extra prior)
-            _base_lnprob = stream_funcs.spline_lnprob_1D
-
-            if prior_callable is not None:
-                def _lnprob_with_extra(theta, *base_args):
-                    lp = _base_lnprob(theta, *base_args)
-                    # If base is invalid, keep it invalid
-                    if not np.isfinite(lp):
-                        return -np.inf
-                    try:
-                        lp_extra = prior_callable(theta)
-                    except Exception:
-                        lp_extra = 0.0
-                    if not np.isfinite(lp_extra):
-                        return -np.inf
-                    return lp + lp_extra
-                lnprob_func = _lnprob_with_extra
-            else:
-                lnprob_func = _base_lnprob
-
+                
+            start = time.time()
+            print(f"Running a single continuous chain for {self.nsteps} iterations starting from {start_label} parameters...")
             es = emcee.EnsembleSampler(
-                self.meta.nwalkers, len(self.meta.flat_p0_guess), lnprob_func,
-                args=(self.meta.prior_arr, self.meta.phi1_spline_points,
-                      self.meta.stream.data.desi_data['VGSR'].values, self.meta.stream.data.desi_data['VRAD_ERR'].values,
-                      self.meta.stream.data.desi_data['FEH'].values, self.meta.stream.data.desi_data['FEH_ERR'].values,
-                      self.meta.stream.data.desi_data['PMRA'].values, self.meta.stream.data.desi_data['PMRA_ERROR'].values,
-                      self.meta.stream.data.desi_data['PMDEC'].values, self.meta.stream.data.desi_data['PMDEC_ERROR'].values,
-                      self.meta.stream.data.desi_data['phi1'].values,
-                      True, False, True, self.meta.spline_k, self.meta.array_lengths,
-                      self.meta.vgsr_trunc, self.meta.feh_trunc, self.meta.pmra_trunc, self.meta.pmdec_trunc),
+                self.meta.nwalkers, len(self.meta.flat_p0_guess), stream_funcs.lnprob,
+                args=(self.meta.prior_arr, self.meta.phi1_spline_points, 
+                    self.meta.stream.data.desi_data['VGSR'].values, self.meta.stream.data.desi_data['VRAD_ERR'].values,
+                    self.meta.stream.data.desi_data['FEH'].values, self.meta.stream.data.desi_data['FEH_ERR'].values,
+                    self.meta.stream.data.desi_data['PMRA'].values, self.meta.stream.data.desi_data['PMRA_ERROR'].values,
+                    self.meta.stream.data.desi_data['PMDEC'].values, self.meta.stream.data.desi_data['PMDEC_ERROR'].values,
+                    self.meta.stream.data.desi_data['phi1'].values, 
+                    True,  # trunc_fit
+                    True,  # assert_prior
+                    False, # feh_fit
+                    self.meta.spline_k, self.meta.array_lengths,
+                    self.meta.vgsr_trunc, self.meta.feh_trunc, self.meta.pmra_trunc, self.meta.pmdec_trunc),
                 pool=pool, backend=self.backend)
-
-            steps_done = 0
-            # Run in chunks to print progress
-            while steps_done < self.nsteps:
-                to_run = min(chunk, self.nsteps - steps_done)
-                try:
-                    state = es.run_mcmc(p0s, to_run, progress=False)
-                except TypeError:
-                    # Older emcee versions may not accept progress kwarg; try without it
-                    state = es.run_mcmc(p0s, to_run)
-
-                # try to extract last walker positions for next chunk
-                try:
-                    # get_chain returns array (nsteps_total, nwalkers, ndim)
-                    chain_all = es.get_chain()
-                    last = chain_all[-1]  # shape (nwalkers, ndim)
-                    p0s = last.copy()
-                except Exception:
-                    # fallback: some emcee versions return a 'coords' attribute in state
-                    if hasattr(state, 'coords'):
-                        p0s = state.coords.copy()
-                    else:
-                        # if we cannot obtain updated positions, break (should be rare)
-                        print("Warning: could not obtain walker positions for next chunk; stopping early.")
-                        break
-
-                steps_done += to_run
-                elapsed = time.time() - start_time
-                # compute mean acceptance fraction if available
-                try:
-                    acc = np.mean(es.acceptance_fraction)
-                except Exception:
-                    acc = np.nan
-
-                # estimate remaining time
-                if steps_done > 0:
-                    rate = elapsed / steps_done
-                    eta = rate * (self.nsteps - steps_done)
-                else:
-                    eta = np.nan
-
-                print(f"[MCMC] {steps_done}/{self.nsteps} steps completed | elapsed: {elapsed:.1f}s | ETA: {eta:.1f}s | mean acc.: {acc:.3f}")
-
-            total_elapsed = time.time() - start_time
-            print(f"[MCMC] Finished {steps_done} steps in {total_elapsed:.1f}s ({total_elapsed/60:.1f} m)")
+            _ = es.run_mcmc(p0s, self.nsteps)
+            print(f'Took {(time.time()-start):.1f} seconds ({(time.time()-start)/60:.1f} minutes)')
 
             # Store chains in the shape expected by show_chains(): (nwalkers, nsteps, ndim)
             try:
@@ -3188,79 +3091,3 @@ class MCMC:
         output_path = f'{outdir}/{self.stream.streamName}_phi2_spline_all%_mem.fits'
         all_table.write(output_path, format='fits', overwrite=True)
         print(f"Saved {len(dataframe)} total stars to: {output_path}")
-
-        # ------------------------------------------------------------------
-        # Write human-readable metrics.txt summarizing the run
-        # Includes print_result output, stream info, truncations, star counts
-        # ------------------------------------------------------------------
-        # Ensure results exist and capture print_result() text
-        import io
-        if not hasattr(self, 'meds'):
-            # print_result also computes meds/errs and diagnostics
-            buf = io.StringIO()
-            try:
-                with redirect_stdout(buf):
-                    self.print_result()
-                print_result_text = buf.getvalue().strip()
-            except Exception as e:
-                print_result_text = f"Error running print_result(): {e}"
-        else:
-            buf = io.StringIO()
-            try:
-                with redirect_stdout(buf):
-                    self.print_result()
-                print_result_text = buf.getvalue().strip()
-            except Exception as e:
-                print_result_text = f"Error running print_result(): {e}"
-
-        # Basic counts
-        total_stars = int(len(dataframe))
-        stream_stars = int((dataframe['stream_prob'] > 0.5).sum())
-        background_stars = int((dataframe['stream_prob'] < 0.5).sum())
-
-        # Truncation info
-        trunc_params = getattr(self.meta, 'truncation_params', {})
-        vgsr_trunc = getattr(self.meta, 'vgsr_trunc', None)
-        feh_trunc = getattr(self.meta, 'feh_trunc', None)
-        pmra_trunc = getattr(self.meta, 'pmra_trunc', None)
-        pmdec_trunc = getattr(self.meta, 'pmdec_trunc', None)
-
-        # Isochrone path
-        isochrone_path = getattr(self.stream, 'isochrone_path', '') or 'N/A'
-
-        # Compose metrics text
-        metrics_lines = []
-        metrics_lines.append("DESI Stream MCMC Run Metrics")
-        metrics_lines.append("============================")
-        metrics_lines.append(f"Stream name: {self.stream.streamName}")
-        metrics_lines.append(f"Output directory: {outdir}")
-        metrics_lines.append(f"Isochrone path: {isochrone_path}")
-        metrics_lines.append("")
-        metrics_lines.append("Truncation settings:")
-        if trunc_params:
-            metrics_lines.append(f"  full: {trunc_params}")
-        if vgsr_trunc is not None:
-            metrics_lines.append(f"  vgsr: {vgsr_trunc}")
-        if feh_trunc is not None:
-            metrics_lines.append(f"  feh:  {feh_trunc}")
-        if pmra_trunc is not None:
-            metrics_lines.append(f"  pmra: {pmra_trunc}")
-        if pmdec_trunc is not None:
-            metrics_lines.append(f"  pmdec: {pmdec_trunc}")
-        metrics_lines.append("")
-        metrics_lines.append("Star counts (threshold p=0.5):")
-        metrics_lines.append(f"  total:       {total_stars}")
-        metrics_lines.append(f"  stream (>):  {stream_stars}")
-        metrics_lines.append(f"  background (<): {background_stars}")
-        metrics_lines.append("")
-        metrics_lines.append("MCMC parameter summary (print_result):")
-        metrics_lines.append("--------------------------------------")
-        metrics_lines.append(print_result_text)
-        metrics_lines.append("")
-
-        try:
-            with open(f"{outdir}/metrics.txt", "w") as f:
-                f.write("\n".join(metrics_lines))
-            print(f"Wrote metrics file: {outdir}/metrics.txt")
-        except Exception as e:
-            print(f"Warning: failed to write metrics.txt: {e}")
