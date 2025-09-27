@@ -1007,6 +1007,8 @@ class StreamPlotter:
         stream_funcs.plot_form(ax[1]) 
         stream_funcs.plot_form(ax[2])
 
+        return fig, ax
+
     def feh_plot(self, showStream=True, show_sf_only=False, background=True, save=False, stream_frame=True):
         """
         Plots the stream metallicity either on-sky or stream_frame
