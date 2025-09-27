@@ -2626,18 +2626,60 @@ class MCMeta:
             p0s[:, i] = np.clip(p0s[:, i], min_val + buffer, max_val - buffer)
 
         # Test likelihood for all walkers using the modified function
-            lkhds = [stream_funcs.lnprob(
-                p0s[j], self.prior_arr, self.phi1_spline_points, 
-                self.stream.data.desi_data['VGSR'].values, self.stream.data.desi_data['VRAD_ERR'].values,
-                self.stream.data.desi_data['FEH'].values, self.stream.data.desi_data['FEH_ERR'].values,
-                self.stream.data.desi_data['PMRA'].values, self.stream.data.desi_data['PMRA_ERROR'].values,
-                self.stream.data.desi_data['PMDEC'].values, self.stream.data.desi_data['PMDEC_ERROR'].values,
-                self.stream.data.desi_data['phi1'].values, 
-                trunc_fit=True, assert_prior=True, feh_fit=True, k=self.spline_k, 
-                reshape_arr_shape=self.array_lengths,
-                vgsr_trunc=self.vgsr_trunc, feh_trunc=self.feh_trunc, 
-                pmra_trunc=self.pmra_trunc, pmdec_trunc=self.pmdec_trunc
-            ) for j in range(self.nwalkers)]
+        print("Testing walker likelihoods...")
+        lkhds = []
+        failed_walkers = []
+        
+        for j in range(self.nwalkers):
+            try:
+                lkhd = stream_funcs.lnprob(
+                    p0s[j], self.prior_arr, self.phi1_spline_points, 
+                    self.stream.data.desi_data['VGSR'].values, self.stream.data.desi_data['VRAD_ERR'].values,
+                    self.stream.data.desi_data['FEH'].values, self.stream.data.desi_data['FEH_ERR'].values,
+                    self.stream.data.desi_data['PMRA'].values, self.stream.data.desi_data['PMRA_ERROR'].values,
+                    self.stream.data.desi_data['PMDEC'].values, self.stream.data.desi_data['PMDEC_ERROR'].values,
+                    self.stream.data.desi_data['phi1'].values, 
+                    trunc_fit=True, assert_prior=True, feh_fit=True, k=self.spline_k, 
+                    reshape_arr_shape=self.array_lengths,
+                    vgsr_trunc=self.vgsr_trunc, feh_trunc=self.feh_trunc, 
+                    pmra_trunc=self.pmra_trunc, pmdec_trunc=self.pmdec_trunc
+                )
+                lkhds.append(lkhd)
+                if lkhd <= -9e9:
+                    failed_walkers.append((j, lkhd, p0s[j]))
+            except Exception as e:
+                print(f"Walker {j} failed with error: {e}")
+                lkhds.append(-np.inf)
+                failed_walkers.append((j, -np.inf, p0s[j]))
+        
+        # Show details about failed walkers if any
+        if failed_walkers:
+            print(f"\nFailed walker details:")
+            print("Walker | Likelihood | Parameters")
+            print("-------|------------|------------")
+            for walker_idx, lkhd, params in failed_walkers[:5]:  # Show first 5 failed walkers
+                print(f"{walker_idx:6d} | {lkhd:10.2e} | {params[:3]}...")  # Show first 3 params
+            
+            # Check parameter ranges for the first failed walker
+            if failed_walkers:
+                print(f"\nDiagnosing parameter issues for walker {failed_walkers[0][0]}:")
+                bad_params = failed_walkers[0][2]
+                for i, (param_val, (low, high), label) in enumerate(zip(bad_params, self.prior_arr, self.param_labels)):
+                    if not (low <= param_val <= high):
+                        print(f"  {label}: {param_val:.4f} outside range ({low:.4f}, {high:.4f})")
+                    elif abs(param_val - low) < 1e-6 or abs(param_val - high) < 1e-6:
+                        print(f"  {label}: {param_val:.4f} too close to boundary ({low:.4f}, {high:.4f})")
+            
+            # Try testing the prior function directly
+            print(f"\nTesting prior function directly on walker {failed_walkers[0][0]}:")
+            try:
+                prior_result = stream_funcs.lnprior(
+                    failed_walkers[0][2], self.prior_arr, self.phi1_spline_points,
+                    assert_prior=True, reshape_arr_shape=self.array_lengths
+                )
+                print(f"Prior result: {prior_result}")
+            except Exception as e:
+                print(f"Prior function failed: {e}")
 
         # Check if prior is good - this is the key test from your original code
         if sum(np.array(lkhds) > -9e9) == self.nwalkers:
@@ -2723,7 +2765,7 @@ class MCMC:
                     self.meta.stream.data.desi_data['PMDEC'].values, self.meta.stream.data.desi_data['PMDEC_ERROR'].values,
                     self.meta.stream.data.desi_data['phi1'].values, 
                     True,  # trunc_fit
-                    True,  # assert_prior
+                    False,  # assert_prior
                     False, # feh_fit
                     self.meta.spline_k, self.meta.array_lengths,
                     self.meta.vgsr_trunc, self.meta.feh_trunc, self.meta.pmra_trunc, self.meta.pmdec_trunc),
@@ -2934,9 +2976,7 @@ class MCMC:
             i += 1
 
     def memprob(self):
-        #Calculate membership probabilities using the new spline_memprob_1D function
-        from stream_functions import spline_memprob_1D
-
+        #Calculate membership probabilities using the new memprob function
         # Get the data from the stream object that was optimized
         data = self.stream.data.desi_data
 
@@ -2944,11 +2984,10 @@ class MCMC:
         theta_final = list(self.meds.values())  # Use the median parameters from MCMC
 
         # Calculate membership probabilities
-        stream_prob = stream_funcs.spline_memprob_1D(
+        stream_prob = stream_funcs.memprob(
             theta=theta_final,
+            prior=self.meta.prior_arr,
             spline_x_points=self.meta.phi1_spline_points,
-            pstream_spline_x_points=self.meta.phi1_spline_points,  # Use same spline points for pstream
-            lsig_vgsr_spline_points=self.meta.phi1_spline_points,  # Use same spline points for lsig_vgsr
             vgsr=data['VGSR'].values,
             vgsr_err=data['VRAD_ERR'].values,
             feh=data['FEH'].values,
@@ -2959,8 +2998,10 @@ class MCMC:
             pmdec_err=data['PMDEC_ERROR'].values,
             phi1=data['phi1'].values,
             trunc_fit=True,  # Use truncated fitting as in your setup
-            reshape_arr_shape=self.meta.array_lengths,
+            assert_prior=False,
+            feh_fit=True,
             k=self.meta.spline_k,
+            reshape_arr_shape=self.meta.array_lengths,
             vgsr_trunc=self.meta.vgsr_trunc,
             feh_trunc=self.meta.feh_trunc,
             pmra_trunc=self.meta.pmra_trunc,

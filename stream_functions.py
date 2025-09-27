@@ -1547,7 +1547,7 @@ def print_meds(stream_dir):
 def call_likelihood(theta, prior, spline_x_points, vgsr, vgsr_err, feh, feh_err, pmra, pmra_err, pmdec, pmdec_err, phi1,
                      trunc_fit = False, assert_prior = False, feh_fit=True, k=2, reshape_arr_shape=None, vgsr_trunc=[-np.inf, np.inf], feh_trunc=[-np.inf, np.inf], pmra_trunc=[-np.inf, np.inf], pmdec_trunc=[-np.inf, np.inf]):
     reshaped_theta = reshape_arr(theta, reshape_arr_shape)
-    lpstream, \
+    pstream, \
     vgsr_spline_points, lsigv, \
     feh1, lsigfeh, \
     pmra_spline_points, lsigpmra, \
@@ -1581,6 +1581,15 @@ def call_likelihood(theta, prior, spline_x_points, vgsr, vgsr_err, feh, feh_err,
     lpmdec_cdf_dif = np.log(stats.norm.cdf(pmdec_trunc[1], loc=bpmdec, scale=scale_bg_pmdec) - stats.norm.cdf(pmdec_trunc[0], loc=bpmdec, scale=scale_bg_pmdec))
     lstream_pmdec = stats.norm.logpdf(pmdec, loc=apply_spline(phi1, spline_x_points, pmdec_spline_points, k=k), scale=scale_stream_pmdec)
     lbg_pmdec = stats.norm.logpdf(pmdec, loc=bpmdec, scale=scale_bg_pmdec) - lpmdec_cdf_dif
+
+    tan_pstream = tan_transform(pstream)
+    lpstream = np.log(atan_inverse(tan_pstream))
+    
+    if np.any(1-(np.e**lpstream) <= 0) | np.any(~np.isfinite(lpstream)):
+        # print(np.array(pstream_spline_points), np.min(phi1), np.max(phi1))
+        # print(type(pstream_spline_points))
+        # print('bad lpstream')
+        return -1e10 # bad lpstream spline extrapolation. May have a dip that goes below 0
 
     lstream = lpstream + lstream_v + lstream_feh + lstream_pmra + lstream_pmdec
     lbg = np.log(1-(np.e**lpstream)) + lbg_v + lbg_feh + lbg_pmra + lbg_pmdec
