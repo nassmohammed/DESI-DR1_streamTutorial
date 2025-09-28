@@ -434,6 +434,7 @@ class stream:
         custom_frame = kwargs.get('custom_frame', None)
         if custom_frame is not None:
             self.frame = custom_frame
+            print('Custom Framed used')
         print('Creating combined DataFrame of SF and DESI')
         # Access desi_data through self.data
         self.data.sfCrossMatch() #saved as confirmed_sf_and_desi
@@ -1010,6 +1011,8 @@ class StreamPlotter:
         stream_funcs.plot_form(ax[0])  
         stream_funcs.plot_form(ax[1]) 
         stream_funcs.plot_form(ax[2])
+
+        return fig, ax
 
     def feh_plot(self, showStream=True, show_sf_only=False, background=True, save=False, stream_frame=True):
         """
