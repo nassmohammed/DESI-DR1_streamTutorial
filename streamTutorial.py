@@ -383,7 +383,7 @@ class Selection:
 
 
 class stream:
-    def __init__(self, data_object, streamName='Sylgr-I21', frame=None):
+    def __init__(self, data_object, streamName='Sylgr-I21', frame=None, **kwargs):
         self.streamName = streamName
         self.frame=frame
         
@@ -430,13 +430,18 @@ class stream:
             self.data.frame = self.data.SoI_galstream.stream_frame
             self.data.SoI_galstream.gal_phi1 = self.data.SoI_galstream.track.transform_to(self.frame).phi1.deg
             self.data.SoI_galstream.gal_phi2 = self.data.SoI_galstream.track.transform_to(self.frame).phi2.deg
-            
+        
+        custom_frame = kwargs.get('custom_frame', None)
+        if custom_frame is not None:
+            self.frame = custom_frame
         print('Creating combined DataFrame of SF and DESI')
         # Access desi_data through self.data
         self.data.sfCrossMatch() #saved as confirmed_sf_and_desi
         self.data.sfCrossMatch(isin=False) #creates DF of stars not in DESI
 
+        # Use a custom frame if provided in kwargs
 
+        
 
         self.data.desi_data['phi1'], self.data.desi_data['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame, np.array(self.data.desi_data['TARGET_RA'])*u.deg, np.array(self.data.desi_data['TARGET_DEC'])*u.deg)
 
