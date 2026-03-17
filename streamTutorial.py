@@ -412,6 +412,7 @@ class stream:
         import galstreams
         mwsts = galstreams.MWStreams(verbose=False, implement_Off=True)
         self.data.SoI_galstream = mwsts.get(streamName, None)
+        # self.frame = self.data.SoI_galstream.frame
         if (self.data.SoI_galstream is not None):
             self.min_dist = np.min(self.data.SoI_galstream.track.distance.value)
             print(self.min_dist)
